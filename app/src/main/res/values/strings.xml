@@ -1,0 +1,15 @@
+<resources>
+    <string name="app_name">خیال راحت</string>
+    <string name="nav_dashboard">پیشخوان</string>
+    <string name="nav_voice">ثبت صوتی</string>
+    <string name="nav_commitments">تعهدات و چک</string>
+    <string name="nav_inflation_shield">سپر تورمی</string>
+    <string name="hero_peace_of_mind_suffix">تومان خیال راحت امروز</string>
+    <string name="hero_subtitle_safe_to_spend">سقف خرج روزانه بدون استرس (پس از کسر چک و اقساط ماه)</string>
+    <string name="recent_transactions">تراکنش‌های اخیر</string>
+    <string name="add_cheque_button">+ ثبت و استعلام چک جدید</string>
+    <string name="convert_surplus_to_gold">تبدیل مازاد تراز به طلا</string>
+    <string name="confirm_voice_entry">تایید و ثبت در پیشخوان</string>
+    <string name="sms_simulator_title">شبیه‌ساز پیامک بانکی (آفلاین)</string>
+    <string name="payday_settings_title">تنظیمات ماه حقوقی و پشتیبان‌گیری</string>
+</resources>

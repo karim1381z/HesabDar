@@ -1,0 +1,6 @@
+{
+  "name": "خیال راحت",
+  "description": "اپلیکیشن مدیریت مالی شخصی، چک صیادی، ثبت صوتی و سپر تورمی ۱۰۰٪ آفلاین و بدون استرس",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,221 @@
+---
+name: Modern Orosi Neobank
+colors:
+  surface: '#131315'
+  surface-dim: '#131315'
+  surface-bright: '#39393b'
+  surface-container-lowest: '#0e0e10'
+  surface-container-low: '#1c1b1d'
+  surface-container: '#201f22'
+  surface-container-high: '#2a2a2c'
+  surface-container-highest: '#353437'
+  on-surface: '#e5e1e4'
+  on-surface-variant: '#c8c5d0'
+  inverse-surface: '#e5e1e4'
+  inverse-on-surface: '#313032'
+  outline: '#928f9a'
+  outline-variant: '#47464f'
+  surface-tint: '#c4c1fb'
+  primary: '#c4c1fb'
+  on-primary: '#2d2a5b'
+  primary-container: '#1e1b4b'
+  on-primary-container: '#8683ba'
+  inverse-primary: '#5b598c'
+  secondary: '#6bd8cb'
+  on-secondary: '#003732'
+  secondary-container: '#29a195'
+  on-secondary-container: '#00302b'
+  tertiary: '#ffb68e'
+  on-tertiary: '#532200'
+  tertiary-container: '#3c1600'
+  on-tertiary-container: '#d56b25'
+  error: '#ffb4ab'
+  on-error: '#690005'
+  error-container: '#93000a'
+  on-error-container: '#ffdad6'
+  primary-fixed: '#e3dfff'
+  primary-fixed-dim: '#c4c1fb'
+  on-primary-fixed: '#181445'
+  on-primary-fixed-variant: '#444173'
+  secondary-fixed: '#89f5e7'
+  secondary-fixed-dim: '#6bd8cb'
+  on-secondary-fixed: '#00201d'
+  on-secondary-fixed-variant: '#005049'
+  tertiary-fixed: '#ffdbca'
+  tertiary-fixed-dim: '#ffb68e'
+  on-tertiary-fixed: '#331200'
+  on-tertiary-fixed-variant: '#763300'
+  background: '#131315'
+  on-background: '#e5e1e4'
+  surface-variant: '#353437'
+typography:
+  display-lg:
+    fontFamily: Space Grotesk
+    fontSize: 3.5rem
+    fontWeight: '900'
+    lineHeight: 4rem
+    letterSpacing: -0.03em
+  headline-lg:
+    fontFamily: Space Grotesk
+    fontSize: 2.25rem
+    fontWeight: '800'
+    lineHeight: 2.75rem
+    letterSpacing: -0.02em
+  headline-lg-mobile:
+    fontFamily: Space Grotesk
+    fontSize: 1.75rem
+    fontWeight: '800'
+    lineHeight: 2.25rem
+    letterSpacing: -0.02em
+  headline-md:
+    fontFamily: Space Grotesk
+    fontSize: 1.5rem
+    fontWeight: '700'
+    lineHeight: 2rem
+    letterSpacing: -0.015em
+  title-lg:
+    fontFamily: Space Grotesk
+    fontSize: 1.25rem
+    fontWeight: '700'
+    lineHeight: 1.75rem
+    letterSpacing: -0.01em
+  title-md:
+    fontFamily: Space Grotesk
+    fontSize: 1.125rem
+    fontWeight: '500'
+    lineHeight: 1.5rem
+  body-lg:
+    fontFamily: Space Grotesk
+    fontSize: 1rem
+    fontWeight: '500'
+    lineHeight: 1.5rem
+  body-md:
+    fontFamily: Space Grotesk
+    fontSize: 0.875rem
+    fontWeight: '500'
+    lineHeight: 1.25rem
+  label-lg:
+    fontFamily: Space Grotesk
+    fontSize: 0.875rem
+    fontWeight: '700'
+    lineHeight: 1.25rem
+    letterSpacing: 0.02em
+  label-md:
+    fontFamily: Space Grotesk
+    fontSize: 0.75rem
+    fontWeight: '700'
+    lineHeight: 1rem
+    letterSpacing: 0.04em
+  label-sm:
+    fontFamily: Space Grotesk
+    fontSize: 0.6875rem
+    fontWeight: '500'
+    lineHeight: 0.875rem
+    letterSpacing: 0.05em
+rounded:
+  sm: 0.25rem
+  DEFAULT: 0.5rem
+  md: 0.75rem
+  lg: 1rem
+  xl: 1.5rem
+  full: 9999px
+spacing:
+  gutter: 1rem
+  gutter-md: 1.5rem
+  gutter-lg: 2rem
+  margin: 1rem
+  margin-md: 1.5rem
+  margin-lg: 2.5rem
+  space-xs: 0.25rem
+  space-sm: 0.5rem
+  space-md: 1rem
+  space-lg: 1.5rem
+  space-xl: 2rem
+---
+
+## Brand & Style
+
+This design system translates the luminous geometry of Persian *Orosi* (traditional stained-glass lattice architecture) into a contemporary, sovereign wealth fintech experience. It merges high-density jewel tones with disciplined structural framing. The emotional tone conveys ancestral permanence, mathematical precision, and bespoke private banking prestige. 
+
+The aesthetic is characterized by:
+- **Luminous Glassmorphic Depth:** Semi-translucent colored panels inspired by sunlight streaming through pigmented glass, supported by crisp internal specular highlights.
+- **Architectural Continuity:** Eradication of generic floating white cards. Layouts are engineered as contiguous stages: anchored header stages flow seamlessly into grounded sheets, nested compartments, and interconnected ledger tracks.
+- **Crystalline Contrast:** Deep nocturnal substrates juxtaposed against vivid lapis, turquoise, saffron, amethyst, and ruby accents, balanced with razor-thin hairline borders that echo wooden sash latticework (*Sasheh*).
+
+## Colors
+
+The color palette is derived entirely from mineral pigments and architectural stained-glass palettes:
+
+- **Primary (`#1E1B4B` - Persian Lapis):** Used for structural stage anchoring, primary interactive foundations, and deep velvet floodfills.
+- **Secondary (`#0D9488` - Nishapur Turquoise):** The color of verification, active financial flows, liquidity metrics, and positive movement.
+- **Tertiary (`#B45309` - Warm Saffron Amber Gold):** Reserved for tier badges, sovereign wealth indicators, VIP yield callouts, and critical focal points.
+- **Accent Amethyst (`#6D28D9` - Royal Amethyst):** Utilized for secondary account partitions, asset yield cards, and security credentials.
+- **Accent Ruby (`#BE185D` - Ruby Rose):** Used for critical alerts, spending outlays, high-priority actions, and security prompts.
+- **Neutral Canvas (`#09090B` - Obsidian Pitch):** The absolute dark canvas substrate beneath the translucent sheets, ensuring total contrast and optical clarity.
+
+Surfaces do not use pure white. All positive contrast text and light surfaces utilize **Alabaster Silk (`#F8FAFC`)** or tinted parchment whites at varying opacities (`rgba(248, 250, 252, 0.04)` to `0.85`).
+
+## Typography
+
+Typography pairs rigorous geometric structures with deliberate financial legibility. The primary structural Latin font maps directly into the Space Grotesk family, tailored to harmonize with Vazirmatn when rendering bilingual Farsi/English banking interfaces.
+
+- **Weight Disciplines:** Use strictly 500 (Medium) for body copy and dense account metadata; 700 (Bold) for list items, card metrics, and structural titles; 800 (ExtraBold) for sectional stages; and 900 (Black) for sovereign balances, large currency representations, and primary KPI hero headers.
+- **Numbers & Currencies:** Tabular figures must be enabled by default (`font-variant-numeric: tabular-nums lining-nums`) for currency amounts, IBANs, and percentage metrics to maintain vertical alignment within financial ledgers.
+- **Icons:** All visual symbols rely solely on Material Symbols Outlined, configured with a 2px stroke, optical size of 24, and sharp corner terminations to echo geometric sash detailing.
+
+## Layout & Spacing
+
+The spatial engine rejects standard fragmented cards in favor of a **Continuous Stage & Sheet Architecture**:
+
+- **Continuous Stage Header:** The viewport begins with an uncontained, deeply saturated Persian Lapis canvas hosting the user profile, aggregate net wealth, and rapid liquidity triggers.
+- **Connected Frosted Sheet:** Emerging directly underneath the stage header, the primary interactive content sheet docks into view with an uninterrupted top border radius of 32px (`2rem`). This sheet features backdrop blurring (`backdrop-filter: blur(24px)`) and extends continuously to the lower viewport boundaries.
+- **Nested Lattice Hierarchy:** Within the sheet, modules are not floating islands; they are nested structural bays partitioned by continuous hairline timeline tracks (`1px solid rgba(255, 255, 255, 0.08)`).
+- **Responsive Adaptation:**
+  - **Mobile (< 768px):** 4-column fluid grid. Zero outer margin for the main sheet; content uses `margin: 1rem`. Stage headers take up 30-40% viewport height.
+  - **Tablet (768px - 1024px):** 8-column layout with pinned vertical timeline rails and side-docked vault selectors.
+  - **Desktop (> 1024px):** 12-column layout. The stage header morphs into a persistent left control column (4 columns), while the interactive frosted sheet spans the right 8 columns.
+
+## Elevation & Depth
+
+Visual hierarchy does not use soft gray drop shadows. Elevation is governed by translucent color stacking, internal refraction, and hair-thin lattice boundaries:
+
+- **Stage Floor (Elevation 0):** Obsidian Pitch (`#09090B`) with deep radial atmospheric gradients of Persian Lapis (`#1E1B4B`) and Nishapur Turquoise (`#0D9488`).
+- **Main Sheet (Elevation 1):** Tinted glass base (`rgba(15, 12, 41, 0.75)`) backed by a 24px backdrop filter blur. Top edge receives a continuous 1px specular light rim: `box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.15)`.
+- **Nested Vault Containers (Elevation 2):** High-contrast jewel inserts (`rgba(30, 27, 75, 0.45)` or `rgba(13, 148, 136, 0.15)`), banded by 1px borders colored via `rgba(255, 255, 255, 0.1)`.
+- **Active Interactive Layer (Elevation 3):** Modal sheets and critical confirmations utilize elevated glass with an amber/saffron ambient bleed: `box-shadow: 0 16px 48px -8px rgba(180, 83, 9, 0.25), inset 0 1px 1px 0 rgba(255, 255, 255, 0.25)`.
+- **Timeline Dividers:** Vertical connector rails are expressed with 1px hairline paths featuring vertical linear gradient strokes: `linear-gradient(180deg, rgba(13, 148, 136, 0.5) 0%, rgba(109, 40, 217, 0.2) 50%, rgba(255, 255, 255, 0.05) 100%)`.
+
+## Shapes
+
+The geometric framework balances contemporary usability with the arched, sweeping forms of Persian Orosi architecture:
+
+- **Main Architectural Sheets:** Anchor at the top edge with a monumental 32px (`2rem`) radius on top-left and top-right corners, while flat at the sides and base.
+- **Nested Containers & Bays:** Default to a controlled `0.5rem` (8px) radius, preventing visual clutter when multiple modules sit contiguous to one another.
+- **Interactive Buttons & Badges:** Utilize `0.75rem` (12px) to `1rem` (16px) pill silhouettes, providing immediate tactile affordance.
+- **Framing Insets:** Decorative corners and structural chips utilize subtle 45-degree corner clips on non-interactive ledger tags to mimic faceted stained-glass framing.
+
+## Components
+
+### Buttons
+- **Primary (Sovereign Gold / Amber):** Solid Warm Saffron Amber (`#B45309`) background with crisp typography in white (`#FFFFFF`), overlaid with an internal top specular border (`inset 0 1px 0 rgba(255, 255, 255, 0.35)`). Active state applies a luminous amber bloom.
+- **Secondary (Turquoise Glass):** Nishapur Turquoise tint (`rgba(13, 148, 136, 0.18)`), 1px Nishapur border (`#0D9488`), text color `#2DD4BF`.
+- **Tertiary (Lattice Ghost):** Transparent fill, 1px border (`rgba(255, 255, 255, 0.12)`), text color `#E2E8F0`. Hover triggers background fill of `rgba(30, 27, 75, 0.5)`.
+
+### Chips & Filter Tags
+- Compact height (32px), pill-shaped with 1px hairline border. Unselected states sit at `rgba(255, 255, 255, 0.05)` fill with muted typography. Active selections ignite with Royal Amethyst (`#6D28D9`) or Turquoise (`#0D9488`) fills and high-contrast white text.
+
+### Nested Ledger Lists & Timeline Dividers
+- Lists do not use isolated bubble cards. Individual transactions share a continuous grounded tray.
+- Items are divided by internal hairlines. Every item links to a continuous left-aligned timeline spine (`2px` thick) with node markers denoting transaction categories (e.g., Turquoise node for deposits, Ruby Rose for debits, Saffron for investments).
+
+### Checkboxes & Radio Controls
+- Geometric square (checkbox) and octagonal-inspired round (radio) profiles with 1.5px borders.
+- Checked state fills with Persian Lapis and Nishapur Turquoise check icons, illuminated by an external micro-glow matching the accent tone.
+
+### Input Fields
+- Understated architectural slots. Fill is dark obsidian glass (`rgba(0, 0, 0, 0.35)`), bordered with a 1px muted frame (`rgba(255, 255, 255, 0.1)`).
+- On focus: Border transitions to Nishapur Turquoise (`#0D9488`) with a matching `0 0 0 3px rgba(13, 148, 136, 0.2)` glow ring. Labels remain pinned in 700 weight, uppercase, tracking `0.04em`.
+
+### Vault Containers (Card Alternatives)
+- Seamless connected panels with dark jewel fills (blended Lapis, Amethyst, and Turquoise). 
+- Specular top rim (`inset 0 1px 0 0 rgba(255, 255, 255, 0.12)`). High contrast typography guarantees primary balance values are immediately scannable against colored backdrops.
