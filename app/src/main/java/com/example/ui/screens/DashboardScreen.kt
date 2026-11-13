@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -73,6 +74,7 @@ fun DashboardScreen(
     settings: AppSettingsEntity,
     transactions: List<TransactionEntity>,
     onHeroCardClick: () -> Unit,
+    onTransactionClick: (TransactionEntity) -> Unit,
     onUntaggedMicClick: (TransactionEntity) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -80,7 +82,7 @@ fun DashboardScreen(
         modifier = modifier
             .fillMaxSize()
             .testTag("dashboard_screen"),
-        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // 1. Radically Decluttered Royal Blue Hero Card
@@ -108,12 +110,9 @@ fun DashboardScreen(
         ) { tx ->
             CalmTransactionCard(
                 transaction = tx,
+                onRowClick = { onTransactionClick(tx) },
                 onUntaggedMicClick = { onUntaggedMicClick(tx) }
             )
-        }
-
-        item {
-            Spacer(modifier = Modifier.height(72.dp))
         }
     }
 }
@@ -206,6 +205,7 @@ private fun CalmRoyalBlueHeroCard(
 @Composable
 private fun CalmTransactionCard(
     transaction: TransactionEntity,
+    onRowClick: () -> Unit,
     onUntaggedMicClick: () -> Unit
 ) {
     val (nodeColor, iconVector, amountColor) = when (transaction.type) {
@@ -225,74 +225,76 @@ private fun CalmTransactionCard(
                 color = if (transaction.isUntagged) NishapurTurquoise.copy(alpha = 0.45f) else OrosiHairline,
                 shape = RoundedCornerShape(20.dp)
             )
-            .padding(horizontal = 16.dp, vertical = 16.dp)
+            .clickable(onClick = onRowClick)
+            .padding(horizontal = 14.dp, vertical = 16.dp)
             .testTag("transaction_item_${transaction.id}"),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
+        verticalAlignment = Alignment.CenterVertically
     ) {
         // Right side (in RTL, start of Row):
-        // If untagged, replace the row's right icon with a glowing, pulsing Turquoise Microphone button labeled "بگو بابت چی؟"
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.weight(1f)
-        ) {
-            if (transaction.isUntagged) {
-                PulsingTurquoiseMicButton(
-                    onClick = onUntaggedMicClick,
-                    testTag = "untagged_mic_button_${transaction.id}"
-                )
-            } else {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .size(46.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(nodeColor.copy(alpha = 0.14f))
-                        .border(1.dp, nodeColor.copy(alpha = 0.40f), RoundedCornerShape(14.dp))
-                ) {
-                    Icon(
-                        imageVector = iconVector,
-                        contentDescription = transaction.title,
-                        tint = nodeColor,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.width(14.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = if (transaction.isUntagged) "خرید کارتی بی‌نام" else transaction.storeName.ifBlank { transaction.title },
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = AlabasterSilk,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = transaction.simpleSubtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = OrosiOnSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.testTag("transaction_subtitle_${transaction.id}")
+        // If untagged, show the single-line Turquoise pill button "بگو بابت چی؟"
+        if (transaction.isUntagged) {
+            PulsingTurquoiseMicButton(
+                onClick = onUntaggedMicClick,
+                testTag = "untagged_mic_button_${transaction.id}"
+            )
+        } else {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(nodeColor.copy(alpha = 0.14f))
+                    .border(1.dp, nodeColor.copy(alpha = 0.40f), RoundedCornerShape(14.dp))
+            ) {
+                Icon(
+                    imageVector = iconVector,
+                    contentDescription = transaction.title,
+                    tint = nodeColor,
+                    modifier = Modifier.size(21.dp)
                 )
             }
         }
 
         Spacer(modifier = Modifier.width(12.dp))
 
+        // Middle Column (Title + Simple Subtitle) with weight(1f) so neither side wraps
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = if (transaction.isUntagged) "خرید کارتی بی‌نام" else transaction.storeName.ifBlank { transaction.title },
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp
+                ),
+                color = AlabasterSilk,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = transaction.simpleSubtitle,
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.5.sp),
+                color = OrosiOnSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.testTag("transaction_subtitle_${transaction.id}")
+            )
+        }
+
+        Spacer(modifier = Modifier.width(10.dp))
+
         // Left side (in RTL, end of Row): Clean single-line amount ("۲۵۰,۰۰۰ تومان" without wrapping "تومان" to a new line)
         val formattedSingleLineAmount = when (transaction.type) {
             "INCOME" -> "+${PersianNumberUtils.formatToman(transaction.userShareToman, showUnit = true)}"
             "SELF_TRANSFER" -> PersianNumberUtils.formatToman(transaction.totalAmountToman, showUnit = true)
-            else -> "${PersianNumberUtils.formatToman(transaction.userShareToman, showUnit = true)}"
+            else -> PersianNumberUtils.formatToman(transaction.userShareToman, showUnit = true)
         }
 
         Text(
             text = formattedSingleLineAmount,
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+            style = MaterialTheme.typography.titleSmall.copy(
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp
+            ),
             color = amountColor,
             maxLines = 1,
             softWrap = false
@@ -308,7 +310,7 @@ private fun PulsingTurquoiseMicButton(
     val infiniteTransition = rememberInfiniteTransition(label = "micPulse")
     val pulseScale by infiniteTransition.animateFloat(
         initialValue = 1.0f,
-        targetValue = 1.06f,
+        targetValue = 1.04f,
         animationSpec = infiniteRepeatable(
             animation = tween(durationMillis = 1100, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
@@ -319,8 +321,9 @@ private fun PulsingTurquoiseMicButton(
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
+            .wrapContentWidth(unbounded = false)
             .scale(pulseScale)
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(12.dp))
             .background(
                 Brush.horizontalGradient(
                     colors = listOf(
@@ -329,21 +332,25 @@ private fun PulsingTurquoiseMicButton(
                     )
                 )
             )
-            .border(1.dp, NishapurTurquoiseBright, RoundedCornerShape(14.dp))
+            .border(1.dp, NishapurTurquoiseBright, RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 10.dp)
+            .padding(horizontal = 8.dp, vertical = 8.dp)
             .testTag(testTag)
     ) {
         Icon(
             imageVector = Icons.Default.Mic,
             contentDescription = "بگو بابت چی؟",
             tint = AlabasterSilk,
-            modifier = Modifier.size(18.dp)
+            modifier = Modifier.size(15.dp)
         )
-        Spacer(modifier = Modifier.width(6.dp))
+        Spacer(modifier = Modifier.width(4.dp))
         Text(
             text = "بگو بابت چی؟",
-            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+            style = MaterialTheme.typography.labelMedium.copy(
+                fontWeight = FontWeight.Bold,
+                fontSize = 12.sp,
+                lineHeight = 16.sp
+            ),
             color = AlabasterSilk,
             maxLines = 1,
             softWrap = false

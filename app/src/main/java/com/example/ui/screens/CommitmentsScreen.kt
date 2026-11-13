@@ -40,12 +40,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.CommitmentEntity
 import com.example.domain.PersianNumberUtils
 import com.example.ui.theme.AlabasterSilk
-import com.example.ui.theme.NishapurTurquoise
 import com.example.ui.theme.NishapurTurquoiseBright
 import com.example.ui.theme.NishapurTurquoiseDeep
 import com.example.ui.theme.NishapurTurquoiseSoft
@@ -189,26 +189,37 @@ private fun SpaciousPurpleSayyadCard(
             .testTag("purple_sayyad_cheque_card")
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
+            // Top Row: Title with weight(1f) + maxLines = 1 + TextOverflow.Ellipsis + 12.dp spacing + Badge
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     text = cheque.title,
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                     color = AlabasterSilk,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = cheque.dueDateStr,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = RoyalAmethystSoft
-                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(Color.White.copy(alpha = 0.14f))
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = cheque.dueDateStr,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = RoyalAmethystSoft,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             Text(
                 text = PersianNumberUtils.formatToman(cheque.amountToman, showUnit = true),
@@ -227,7 +238,9 @@ private fun SpaciousPurpleSayyadCard(
             Text(
                 text = if (cheque.isSettled) "✓ پاس شده" else cheque.counterparty,
                 style = MaterialTheme.typography.bodySmall,
-                color = if (cheque.isSettled) NishapurTurquoiseSoft else RoyalAmethystSoft
+                color = if (cheque.isSettled) NishapurTurquoiseSoft else RoyalAmethystSoft,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
@@ -275,13 +288,17 @@ private fun SpaciousCommitmentCard(
                 Text(
                     text = commitment.title,
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = AlabasterSilk
+                    color = AlabasterSilk,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = if (commitment.isSettled) "✓ تسویه شد" else commitment.dueDateStr,
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (commitment.isSettled) NishapurTurquoiseBright else OrosiOnSurfaceVariant
+                    color = if (commitment.isSettled) NishapurTurquoiseBright else OrosiOnSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }

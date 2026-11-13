@@ -1,9 +1,12 @@
 package com.example
 
+import android.Manifest
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
@@ -59,6 +62,7 @@ import com.example.ui.components.ConvertSurplusToGoldBottomSheet
 import com.example.ui.components.HeroMathBreakdownBottomSheet
 import com.example.ui.components.PaydayAndBackupBottomSheet
 import com.example.ui.components.SmsSimulatorBottomSheet
+import com.example.ui.components.TransactionDetailAndEditBottomSheet
 import com.example.ui.components.VoiceOverlayBottomSheet
 import com.example.ui.screens.CommitmentsScreen
 import com.example.ui.screens.DashboardScreen
@@ -98,6 +102,12 @@ fun OrosiFinanceApp(
     uiState: OrosiUiState,
     viewModel: OrosiViewModel
 ) {
+    val smsPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ ->
+        viewModel.setShowSmsSimulator(true)
+    }
+
     val reservedCommitmentsToman = uiState.commitments
         .filter { !it.isSettled && (it.category == "SAYYAD_ISSUED" || it.category == "LOAN_INSTALLMENT") }
         .sumOf { it.amountToman }
@@ -112,7 +122,14 @@ fun OrosiFinanceApp(
             OrosiTopHeader(
                 currentScreen = uiState.currentScreen,
                 onProfileClick = { viewModel.setShowPaydayBackupModal(true) },
-                onBellClick = { viewModel.setShowSmsSimulator(true) }
+                onBellClick = {
+                    smsPermissionLauncher.launch(
+                        arrayOf(
+                            Manifest.permission.RECEIVE_SMS,
+                            Manifest.permission.READ_SMS
+                        )
+                    )
+                }
             )
         },
         floatingActionButton = {
@@ -182,6 +199,7 @@ fun OrosiFinanceApp(
                             settings = uiState.settings,
                             transactions = uiState.transactions,
                             onHeroCardClick = { viewModel.setShowHeroMathSheet(true) },
+                            onTransactionClick = { tx -> viewModel.openTransactionDetails(tx) },
                             onUntaggedMicClick = { tx -> viewModel.openVoiceForUntaggedTransaction(tx) }
                         )
                     }
@@ -207,10 +225,33 @@ fun OrosiFinanceApp(
         }
     }
 
+    // Full Transaction Details & Edit Bottom Sheet (6 Core Fields + Classification Toggle + Voice Re-tag)
+    val detailTx = uiState.selectedTransactionForDetail
+    if (detailTx != null) {
+        TransactionDetailAndEditBottomSheet(
+            transaction = detailTx,
+            onQuickVoiceRetag = { tx -> viewModel.openVoiceForUntaggedTransaction(tx) },
+            onSaveEdits = { amount, date, time, card, purpose, store, mode ->
+                viewModel.saveTransactionEdits(
+                    originalTx = detailTx,
+                    amountToman = amount,
+                    weekdayDate = date,
+                    timeStr = time,
+                    cardInfo = card,
+                    purpose = purpose,
+                    storeName = store,
+                    specialTagMode = mode
+                )
+            },
+            onDismiss = { viewModel.dismissTransactionDetails() }
+        )
+    }
+
     // Effortless Voice Overlay Bottom Sheet
     if (uiState.showVoiceOverlaySheet) {
         VoiceOverlayBottomSheet(
             voiceState = uiState.voiceState,
+            onSpeechChange = { viewModel.onVoiceSpeechChanged(it) },
             onSimulateVoiceRecord = { viewModel.triggerVoiceSimulation(null) },
             onConfirmVoiceEntry = { viewModel.confirmVoiceEntry() },
             onDismiss = { viewModel.dismissVoiceOverlay() }

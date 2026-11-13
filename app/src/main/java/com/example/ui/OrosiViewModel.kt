@@ -53,6 +53,7 @@ data class OrosiUiState(
     val transactions: List<TransactionEntity> = emptyList(),
     val commitments: List<CommitmentEntity> = emptyList(),
     val voiceState: VoiceUiState = VoiceUiState(),
+    val selectedTransactionForDetail: TransactionEntity? = null,
     val showVoiceOverlaySheet: Boolean = false,
     val showHeroMathSheet: Boolean = false,
     val showSmsSimulatorModal: Boolean = false,
@@ -70,6 +71,7 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
     private val _currentScreen = MutableStateFlow(OrosiScreen.DASHBOARD)
     private val _selectedCommitmentTab = MutableStateFlow(CommitmentTab.SAYYAD)
     private val _voiceState = MutableStateFlow(VoiceUiState())
+    private val _selectedTransactionForDetail = MutableStateFlow<TransactionEntity?>(null)
     private val _showVoiceOverlaySheet = MutableStateFlow(false)
     private val _showHeroMathSheet = MutableStateFlow(false)
     private val _showSmsSimulatorModal = MutableStateFlow(false)
@@ -120,19 +122,21 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
         )
     }.combine(
         combine(
+            _selectedTransactionForDetail,
             _showAddCommitmentModal,
             _showConvertGoldModal,
             _backupJsonText,
             _statusBannerMessage
-        ) { addComm, goldModal, backup, banner ->
-            Tuple4(addComm, goldModal, backup, banner)
+        ) { selectedTx, addComm, goldModal, backup, banner ->
+            Tuple5(selectedTx, addComm, goldModal, backup, banner)
         }
     ) { state, extra ->
         state.copy(
-            showAddCommitmentModal = extra.first,
-            showConvertGoldModal = extra.second,
-            backupJsonText = extra.third,
-            statusBannerMessage = extra.fourth
+            selectedTransactionForDetail = extra.first,
+            showAddCommitmentModal = extra.second,
+            showConvertGoldModal = extra.third,
+            backupJsonText = extra.fourth,
+            statusBannerMessage = extra.fifth
         )
     }.stateIn(
         scope = viewModelScope,
@@ -152,6 +156,40 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
         _showHeroMathSheet.value = show
     }
 
+    fun openTransactionDetails(tx: TransactionEntity) {
+        _selectedTransactionForDetail.value = tx
+    }
+
+    fun dismissTransactionDetails() {
+        _selectedTransactionForDetail.value = null
+    }
+
+    fun saveTransactionEdits(
+        originalTx: TransactionEntity,
+        amountToman: Long,
+        weekdayDate: String,
+        timeStr: String,
+        cardInfo: String,
+        purpose: String,
+        storeName: String,
+        specialTagMode: String
+    ) {
+        viewModelScope.launch {
+            repository.updateTransactionDetails(
+                originalTx = originalTx,
+                amountToman = amountToman,
+                weekdayDate = weekdayDate,
+                timeStr = timeStr,
+                cardInfo = cardInfo,
+                purpose = purpose,
+                storeName = storeName,
+                specialTagMode = specialTagMode
+            )
+            _selectedTransactionForDetail.value = null
+            showBanner("جزئیات تراکنش «$storeName» با موفقیت بروزرسانی شد.")
+        }
+    }
+
     fun openVoiceOverlayNew() {
         val defaultSpeech = "پانصد هزار تومان خرید میوه از اسنپ‌مارکت با کارت بلو که ۲۰۰ تومنش دنگ علی بود"
         parseAndUpdateVoiceState(defaultSpeech, null)
@@ -159,6 +197,7 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun openVoiceForUntaggedTransaction(tx: TransactionEntity) {
+        _selectedTransactionForDetail.value = null
         val suggestedSpeech = "${PersianNumberUtils.formatToman(tx.totalAmountToman)} تومان خرید میوه از اسنپ‌مارکت با ${tx.cardInfo} که ۱۰۰ تومنش دنگ علی بود"
         val parsed = PersianVoiceSlangParserEngine.parseSpokenText(
             suggestedSpeech,
@@ -371,13 +410,6 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 }
-
-private data class Tuple4<A, B, C, D>(
-    val first: A,
-    val second: B,
-    val third: C,
-    val fourth: D
-)
 
 private data class Tuple5<A, B, C, D, E>(
     val first: A,

@@ -1,5 +1,14 @@
 package com.example.ui.components
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Bundle
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -29,6 +38,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CurrencyExchange
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.Sms
@@ -48,6 +58,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,12 +71,15 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.example.data.local.AppSettingsEntity
+import com.example.data.local.TransactionEntity
 import com.example.domain.ParsedSmsResult
 import com.example.domain.PersianNumberUtils
 import com.example.ui.VoiceUiState
@@ -91,11 +105,101 @@ import kotlin.math.sin
 @Composable
 fun VoiceOverlayBottomSheet(
     voiceState: VoiceUiState,
+    onSpeechChange: (String) -> Unit,
     onSimulateVoiceRecord: () -> Unit,
     onConfirmVoiceEntry: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var isLiveHardwareListening by remember { mutableStateOf(false) }
+
+    val speechRecognizer = remember {
+        if (SpeechRecognizer.isRecognitionAvailable(context)) {
+            SpeechRecognizer.createSpeechRecognizer(context)
+        } else {
+            null
+        }
+    }
+
+    DisposableEffect(speechRecognizer) {
+        val listener = object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {
+                isLiveHardwareListening = true
+            }
+            override fun onBeginningOfSpeech() {
+                isLiveHardwareListening = true
+            }
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {
+                isLiveHardwareListening = false
+            }
+            override fun onError(error: Int) {
+                isLiveHardwareListening = false
+                // Fallback to interactive preset simulator if hardware recognizer fails
+                onSimulateVoiceRecord()
+            }
+            override fun onResults(results: Bundle?) {
+                isLiveHardwareListening = false
+                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                val firstSpoken = matches?.firstOrNull()
+                if (!firstSpoken.isNullOrBlank()) {
+                    onSpeechChange(firstSpoken)
+                } else {
+                    onSimulateVoiceRecord()
+                }
+            }
+            override fun onPartialResults(partialResults: Bundle?) {
+                val partial = partialResults
+                    ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    ?.firstOrNull()
+                if (!partial.isNullOrBlank()) {
+                    onSpeechChange(partial)
+                }
+            }
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+        }
+        speechRecognizer?.setRecognitionListener(listener)
+
+        onDispose {
+            try {
+                speechRecognizer?.destroy()
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun startRealOrFallbackRecognition() {
+        if (speechRecognizer != null) {
+            try {
+                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                    putExtra(
+                        RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                        RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                    )
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, "fa-IR")
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "fa-IR")
+                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                }
+                speechRecognizer.startListening(intent)
+            } catch (_: Exception) {
+                onSimulateVoiceRecord()
+            }
+        } else {
+            onSimulateVoiceRecord()
+        }
+    }
+
+    val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            startRealOrFallbackRecognition()
+        } else {
+            onSimulateVoiceRecord()
+        }
+    }
+
     val infiniteTransition = rememberInfiniteTransition(label = "voiceOverlayWave")
     val phase by infiniteTransition.animateFloat(
         initialValue = 0f,
@@ -121,7 +225,7 @@ fun VoiceOverlayBottomSheet(
                 .testTag("voice_overlay_sheet"),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // 1. Glowing Turquoise Audio Wave (Tappable to cycle/record spoken sentence)
+            // 1. Glowing Turquoise Audio Wave (Uses real fa-IR SpeechRecognizer or Preview Fallback)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -139,7 +243,19 @@ fun VoiceOverlayBottomSheet(
                         NishapurTurquoiseBright.copy(alpha = 0.50f),
                         RoundedCornerShape(24.dp)
                     )
-                    .clickable { onSimulateVoiceRecord() }
+                    .clickable {
+                        val hasAudioPerm = ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.RECORD_AUDIO
+                        ) == PackageManager.PERMISSION_GRANTED
+                        if (hasAudioPerm) {
+                            startRealOrFallbackRecognition()
+                        } else if (SpeechRecognizer.isRecognitionAvailable(context)) {
+                            recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        } else {
+                            onSimulateVoiceRecord()
+                        }
+                    }
                     .padding(vertical = 26.dp, horizontal = 20.dp)
                     .testTag("voice_record_button"),
                 contentAlignment = Alignment.Center
@@ -158,7 +274,11 @@ fun VoiceOverlayBottomSheet(
                     for (i in 0 until barCount) {
                         val norm = i.toFloat() / barCount.toFloat()
                         val envelope = sin(norm * Math.PI).toFloat()
-                        val dynamicWave = 0.30f + 0.65f * kotlin.math.abs(sin(phase + i * 0.45f))
+                        val dynamicWave = if (isLiveHardwareListening || voiceState.isRecordingSimulated) {
+                            0.38f + 0.62f * kotlin.math.abs(sin(phase * 1.4f + i * 0.45f))
+                        } else {
+                            0.30f + 0.65f * kotlin.math.abs(sin(phase + i * 0.45f))
+                        }
                         val barHeight = (size.height * 0.88f * envelope * dynamicWave).coerceAtLeast(10f)
                         val x = (totalWidth - (barCount * (barWidth + spacing))) / 2f + i * (barWidth + spacing)
 
@@ -208,6 +328,306 @@ fun VoiceOverlayBottomSheet(
                 Text(
                     text = "تأیید",
                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.ExtraBold)
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TransactionDetailAndEditBottomSheet(
+    transaction: TransactionEntity,
+    onQuickVoiceRetag: (TransactionEntity) -> Unit,
+    onSaveEdits: (
+        amountToman: Long,
+        weekdayDate: String,
+        timeStr: String,
+        cardInfo: String,
+        purpose: String,
+        storeName: String,
+        specialTagMode: String
+    ) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var amountStr by remember(transaction) {
+        mutableStateOf(PersianNumberUtils.formatToman(transaction.userShareToman.takeIf { it > 0L } ?: transaction.totalAmountToman))
+    }
+    var weekdayDateStr by remember(transaction) {
+        val base = transaction.weekdayDate
+        mutableStateOf(if (base.contains("۱۴۰")) base else "$base ۱۴۰۵")
+    }
+    var timeStr by remember(transaction) { mutableStateOf(transaction.timeStr) }
+    var cardInfoStr by remember(transaction) { mutableStateOf(transaction.cardInfo) }
+    var purposeStr by remember(transaction) {
+        mutableStateOf(if (transaction.isUntagged) "" else transaction.purpose)
+    }
+    var storeStr by remember(transaction) {
+        mutableStateOf(if (transaction.isUntagged) "" else transaction.storeName)
+    }
+    var specialTagMode by remember(transaction) {
+        mutableStateOf(if (transaction.type == "GOLD_SAVE") "GOLD_SAVE" else "NORMAL")
+    }
+
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = OrosiSurfaceLow,
+        contentColor = AlabasterSilk
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 28.dp)
+                .testTag("transaction_detail_sheet")
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "جزئیات کامل و ویرایش تراکنش",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                    color = AlabasterSilk
+                )
+                IconButton(onClick = onDismiss) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "بستن",
+                        tint = OrosiOnSurfaceVariant
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Quick Voice Re-tagging Button
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(NishapurTurquoiseDeep)
+                    .border(1.dp, NishapurTurquoiseBright, RoundedCornerShape(14.dp))
+                    .clickable { onQuickVoiceRetag(transaction) }
+                    .padding(vertical = 12.dp, horizontal = 16.dp)
+                    .testTag("sheet_voice_retag_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Mic,
+                    contentDescription = null,
+                    tint = NishapurTurquoiseBright,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "تکمیل یا ویرایش سریع با صدای فارسی",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    color = AlabasterSilk
+                )
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // 1) مبلغ (تومان)
+            OutlinedTextField(
+                value = amountStr,
+                onValueChange = { amountStr = PersianNumberUtils.toPersianDigits(it) },
+                label = { Text("۱) مبلغ (تومان)") },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("detail_amount_input"),
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = NishapurTurquoiseBright,
+                    unfocusedBorderColor = OrosiHairline
+                )
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // 2) تاریخ شمسی + روز هفته دقیق & 3) ساعت دقیق
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedTextField(
+                    value = weekdayDateStr,
+                    onValueChange = { weekdayDateStr = PersianNumberUtils.toPersianDigits(it) },
+                    label = { Text("۲) تاریخ شمسی و روز هفته") },
+                    modifier = Modifier
+                        .weight(1.45f)
+                        .testTag("detail_date_input"),
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = NishapurTurquoiseBright,
+                        unfocusedBorderColor = OrosiHairline
+                    )
+                )
+
+                OutlinedTextField(
+                    value = timeStr,
+                    onValueChange = { timeStr = PersianNumberUtils.toPersianDigits(it) },
+                    label = { Text("۳) ساعت دقیق") },
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("detail_time_input"),
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = NishapurTurquoiseBright,
+                        unfocusedBorderColor = OrosiHairline
+                    )
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // 4) کارت بانکی و ۴ رقم آخر
+            OutlinedTextField(
+                value = cardInfoStr,
+                onValueChange = { cardInfoStr = PersianNumberUtils.toPersianDigits(it) },
+                label = { Text("۴) کارت بانکی و ۴ رقم آخر") },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("detail_card_input"),
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = NishapurTurquoiseBright,
+                    unfocusedBorderColor = OrosiHairline
+                )
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // 5) بابتِ (Category/Purpose)
+            OutlinedTextField(
+                value = purposeStr,
+                onValueChange = { purposeStr = it },
+                label = { Text("۵) بابتِ (دسته‌بندی / علت تراکنش)") },
+                placeholder = { Text("مثلاً: خرید میوه و تره‌بار") },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("detail_purpose_input"),
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = NishapurTurquoiseBright,
+                    unfocusedBorderColor = OrosiHairline
+                )
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // 6) از فروشگاه (Merchant/Store)
+            OutlinedTextField(
+                value = storeStr,
+                onValueChange = { storeStr = it },
+                label = { Text("۶) از فروشگاه (نام پذیرنده)") },
+                placeholder = { Text("مثلاً: اسنپ‌مارکت") },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("detail_store_input"),
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = NishapurTurquoiseBright,
+                    unfocusedBorderColor = OrosiHairline
+                )
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Text(
+                text = "تبدیل یا نشانه‌گذاری نوع تراکنش:",
+                style = MaterialTheme.typography.labelLarge,
+                color = OrosiOnSurfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Toggle to mark as "قسط/وام", "بدهی/طلب (دُنگ)", or "تبدیل به طلا"
+            val modeOptions = listOf(
+                "NORMAL" to "خرج عادی",
+                "INSTALLMENT" to "قسط/وام",
+                "DONG" to "بدهی/طلب (دُنگ)",
+                "GOLD_SAVE" to "تبدیل به طلا"
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                modeOptions.forEach { (modeKey, modeLabel) ->
+                    val isSelected = specialTagMode == modeKey
+                    val activeColor = when (modeKey) {
+                        "INSTALLMENT" -> RoyalAmethyst
+                        "DONG" -> NishapurTurquoise
+                        "GOLD_SAVE" -> SaffronGold
+                        else -> PersianLapis
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (isSelected) activeColor else OrosiSurfaceContainer)
+                            .border(
+                                1.dp,
+                                if (isSelected) Color.White.copy(alpha = 0.45f) else OrosiHairline,
+                                RoundedCornerShape(12.dp)
+                            )
+                            .clickable { specialTagMode = modeKey }
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                            .testTag("tx_mode_toggle_$modeKey")
+                    ) {
+                        Text(
+                            text = modeLabel,
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = AlabasterSilk,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Button(
+                onClick = {
+                    val parsedAmount = PersianNumberUtils.toEnglishDigits(amountStr).toLongOrNull()
+                        ?: transaction.totalAmountToman
+                    val cleanWeekdayDate = weekdayDateStr.replace("۱۴۰۵", "").replace("۱۴۰۳", "").trim()
+                        .ifEmpty { transaction.weekdayDate }
+                    onSaveEdits(
+                        parsedAmount,
+                        cleanWeekdayDate,
+                        timeStr.ifBlank { transaction.timeStr },
+                        cardInfoStr.ifBlank { transaction.cardInfo },
+                        purposeStr.ifBlank { "خرید روزمره" },
+                        storeStr.ifBlank { "فروشگاه" },
+                        specialTagMode
+                    )
+                },
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = NishapurTurquoise,
+                    contentColor = AlabasterSilk
+                ),
+                contentPadding = PaddingValues(vertical = 16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, NishapurTurquoiseBright, RoundedCornerShape(16.dp))
+                    .testTag("save_transaction_edits_button")
+            ) {
+                Icon(imageVector = Icons.Default.Check, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "ذخیره تغییرات",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 )
             }
         }
@@ -379,7 +799,7 @@ fun SmsSimulatorBottomSheet(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "شبیه‌ساز پیامک بانکی (آفلاین)",
+                        text = "دریافت خودکار و شبیه‌ساز پیامک بانکی",
                         style = MaterialTheme.typography.titleLarge,
                         color = AlabasterSilk
                     )

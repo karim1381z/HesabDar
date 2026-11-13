@@ -436,6 +436,84 @@ class OrosiFinanceRepository(private val dao: OrosiDao) {
         )
     }
 
+    suspend fun updateTransactionDetails(
+        originalTx: TransactionEntity,
+        amountToman: Long,
+        weekdayDate: String,
+        timeStr: String,
+        cardInfo: String,
+        purpose: String,
+        storeName: String,
+        specialTagMode: String // "NORMAL", "INSTALLMENT", "DONG", "GOLD_SAVE"
+    ) {
+        val cleanStore = storeName.trim().ifEmpty { "فروشگاه" }
+        val cleanPurpose = purpose.trim().ifEmpty { "خرید روزمره" }
+        val newType = if (specialTagMode == "GOLD_SAVE") "GOLD_SAVE" else originalTx.type
+        val updatedTitle = "$cleanStore ($cleanPurpose)"
+
+        dao.updateTransaction(
+            originalTx.copy(
+                title = updatedTitle,
+                storeName = cleanStore,
+                purpose = cleanPurpose,
+                totalAmountToman = amountToman,
+                userShareToman = amountToman,
+                weekdayDate = weekdayDate.trim(),
+                timeStr = timeStr.trim(),
+                cardInfo = cardInfo.trim(),
+                type = newType,
+                isUntagged = false
+            )
+        )
+
+        val now = System.currentTimeMillis()
+        when (specialTagMode) {
+            "INSTALLMENT" -> {
+                dao.insertCommitment(
+                    CommitmentEntity(
+                        category = "LOAN_INSTALLMENT",
+                        title = "قسط/وام: $cleanPurpose ($cleanStore)",
+                        counterparty = cardInfo.trim(),
+                        amountToman = amountToman,
+                        dueDateStr = "$weekdayDate • $timeStr",
+                        sayyadId = "",
+                        statusText = "ثبت‌شده از جزئیات تراکنش",
+                        isSettled = false,
+                        timestamp = now
+                    )
+                )
+            }
+            "DONG" -> {
+                dao.insertCommitment(
+                    CommitmentEntity(
+                        category = "DONG",
+                        title = "بدهی/طلب (دُنگ): $cleanPurpose از $cleanStore",
+                        counterparty = "پرداخت با ${cardInfo.trim()}",
+                        amountToman = amountToman,
+                        dueDateStr = "$weekdayDate • $timeStr",
+                        sayyadId = "",
+                        statusText = "در انتظار تسویه دُنگ",
+                        isSettled = false,
+                        timestamp = now
+                    )
+                )
+            }
+            "GOLD_SAVE" -> {
+                if (originalTx.type != "GOLD_SAVE") {
+                    val settings = dao.getSettingsNow() ?: AppSettingsEntity()
+                    val addedGrams = amountToman.toDouble() / settings.goldPrice18kToman.coerceAtLeast(1L).toDouble()
+                    val newGoldGrams = ((settings.goldGrams + addedGrams) * 100.0).toLong() / 100.0
+                    dao.saveSettings(
+                        settings.copy(
+                            goldReserveToman = settings.goldReserveToman + amountToman,
+                            goldGrams = newGoldGrams
+                        )
+                    )
+                }
+            }
+        }
+    }
+
     suspend fun toggleDailyAutoSaveGold(enabled: Boolean) {
         val settings = dao.getSettingsNow() ?: AppSettingsEntity()
         dao.saveSettings(settings.copy(dailyAutoSaveEnabled = enabled))
