@@ -22,10 +22,9 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 enum class OrosiScreen(val route: String, val persianTitle: String) {
-    DASHBOARD("dashboard", "پیشخوان"),
-    VOICE_ENTRY("voice_entry", "ثبت صوتی"),
-    COMMITMENTS("commitments", "تعهدات و چک"),
-    INFLATION_SHIELD("inflation_shield", "سپر تورمی")
+    DASHBOARD("dashboard", "امروز من"),
+    COMMITMENTS("commitments", "قسط و چک"),
+    INFLATION_SHIELD("inflation_shield", "قلک طلا")
 }
 
 enum class CommitmentTab(val title: String) {
@@ -54,6 +53,8 @@ data class OrosiUiState(
     val transactions: List<TransactionEntity> = emptyList(),
     val commitments: List<CommitmentEntity> = emptyList(),
     val voiceState: VoiceUiState = VoiceUiState(),
+    val showVoiceOverlaySheet: Boolean = false,
+    val showHeroMathSheet: Boolean = false,
     val showSmsSimulatorModal: Boolean = false,
     val showPaydayBackupModal: Boolean = false,
     val showAddCommitmentModal: Boolean = false,
@@ -69,6 +70,8 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
     private val _currentScreen = MutableStateFlow(OrosiScreen.DASHBOARD)
     private val _selectedCommitmentTab = MutableStateFlow(CommitmentTab.SAYYAD)
     private val _voiceState = MutableStateFlow(VoiceUiState())
+    private val _showVoiceOverlaySheet = MutableStateFlow(false)
+    private val _showHeroMathSheet = MutableStateFlow(false)
     private val _showSmsSimulatorModal = MutableStateFlow(false)
     private val _showPaydayBackupModal = MutableStateFlow(false)
     private val _showAddCommitmentModal = MutableStateFlow(false)
@@ -100,29 +103,36 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
     }.combine(
         combine(
             _voiceState,
+            _showVoiceOverlaySheet,
+            _showHeroMathSheet,
             _showSmsSimulatorModal,
-            _showPaydayBackupModal,
-            _showAddCommitmentModal,
-            _showConvertGoldModal
-        ) { voice, smsModal, paydayModal, addCommModal, goldModal ->
-             Tuple5(voice, smsModal, paydayModal, addCommModal, goldModal)
+            _showPaydayBackupModal
+        ) { voice, voiceSheet, mathSheet, smsModal, paydayModal ->
+            Tuple5(voice, voiceSheet, mathSheet, smsModal, paydayModal)
         }
     ) { base, modals ->
         base.copy(
             voiceState = modals.first,
-            showSmsSimulatorModal = modals.second,
-            showPaydayBackupModal = modals.third,
-            showAddCommitmentModal = modals.fourth,
-            showConvertGoldModal = modals.fifth
+            showVoiceOverlaySheet = modals.second,
+            showHeroMathSheet = modals.third,
+            showSmsSimulatorModal = modals.fourth,
+            showPaydayBackupModal = modals.fifth
         )
     }.combine(
-        combine(_backupJsonText, _statusBannerMessage) { backup, banner ->
-            Pair(backup, banner)
+        combine(
+            _showAddCommitmentModal,
+            _showConvertGoldModal,
+            _backupJsonText,
+            _statusBannerMessage
+        ) { addComm, goldModal, backup, banner ->
+            Tuple4(addComm, goldModal, backup, banner)
         }
     ) { state, extra ->
         state.copy(
-            backupJsonText = extra.first,
-            statusBannerMessage = extra.second
+            showAddCommitmentModal = extra.first,
+            showConvertGoldModal = extra.second,
+            backupJsonText = extra.third,
+            statusBannerMessage = extra.fourth
         )
     }.stateIn(
         scope = viewModelScope,
@@ -136,6 +146,16 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectCommitmentTab(tab: CommitmentTab) {
         _selectedCommitmentTab.value = tab
+    }
+
+    fun setShowHeroMathSheet(show: Boolean) {
+        _showHeroMathSheet.value = show
+    }
+
+    fun openVoiceOverlayNew() {
+        val defaultSpeech = "پانصد هزار تومان خرید میوه از اسنپ‌مارکت با کارت بلو که ۲۰۰ تومنش دنگ علی بود"
+        parseAndUpdateVoiceState(defaultSpeech, null)
+        _showVoiceOverlaySheet.value = true
     }
 
     fun openVoiceForUntaggedTransaction(tx: TransactionEntity) {
@@ -156,13 +176,11 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
             userShareToman = parsed.userShareToman,
             targetUntaggedTransaction = tx
         )
-        _currentScreen.value = OrosiScreen.VOICE_ENTRY
-        showBanner("حالت تکمیل صوتی تراکنش پیامکی (${PersianNumberUtils.formatToman(tx.totalAmountToman, true)}) فعال شد")
+        _showVoiceOverlaySheet.value = true
     }
 
-    fun clearTargetUntaggedTransaction() {
-        val defaultSpeech = "پانصد هزار تومان خرید میوه از اسنپ‌مارکت با کارت بلو که ۲۰۰ تومنش دنگ علی بود"
-        parseAndUpdateVoiceState(defaultSpeech, null)
+    fun dismissVoiceOverlay() {
+        _showVoiceOverlaySheet.value = false
     }
 
     fun onVoiceSpeechChanged(newSpeech: String) {
@@ -188,28 +206,10 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    fun updateExtractedVoiceFields(
-        storeName: String,
-        purposeCategory: String,
-        dongAmountToman: Long,
-        dongFriendName: String
-    ) {
-        val current = _voiceState.value
-        val safeDong = dongAmountToman.coerceIn(0L, current.totalAmountToman)
-        val userShare = (current.totalAmountToman - safeDong).coerceAtLeast(0L)
-        _voiceState.value = current.copy(
-            storeName = storeName,
-            purposeCategory = purposeCategory,
-            dongAmountToman = safeDong,
-            dongFriendName = dongFriendName,
-            userShareToman = userShare
-        )
-    }
-
     fun triggerVoiceSimulation(samplePhrase: String? = null) {
         viewModelScope.launch {
             _voiceState.value = _voiceState.value.copy(isRecordingSimulated = true)
-            delay(900L)
+            delay(750L)
             val phrases = listOf(
                 "پانصد هزار تومان خرید میوه از اسنپ‌مارکت با کارت بلو که ۲۰۰ تومنش دنگ علی بود",
                 "هشتصد تومن شام رستوران نایب با کارت ملت که نصفش دنگ سارا بود",
@@ -237,13 +237,13 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
             )
             repository.confirmVoiceExpense(parsed, v.targetUntaggedTransaction?.id)
             val msg = if (v.dongAmountToman > 0L && v.dongFriendName.isNotBlank()) {
-                "ثبت شد! فقط سهم شما (${PersianNumberUtils.formatToman(v.userShareToman, true)}) از خیال راحت امروز کسر شد و سهم ${v.dongFriendName} (${PersianNumberUtils.formatToman(v.dongAmountToman, true)}) به تب دُنگ اضافه گردید."
+                "ثبت شد! فقط سهم شما (${PersianNumberUtils.formatToman(v.userShareToman, true)}) کسر شد و دنگ ${v.dongFriendName} کنار گذاشته شد."
             } else {
-                "تراکنش صوتی «${v.storeName}» به مبلغ ${PersianNumberUtils.formatToman(v.userShareToman, true)} با موفقیت در پیشخوان ثبت شد."
+                "«${v.storeName}» به مبلغ ${PersianNumberUtils.formatToman(v.userShareToman, true)} ثبت شد."
             }
+            _showVoiceOverlaySheet.value = false
             _voiceState.value = _voiceState.value.copy(targetUntaggedTransaction = null)
             showBanner(msg)
-            _currentScreen.value = OrosiScreen.DASHBOARD
         }
     }
 
@@ -290,7 +290,7 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
                 dailySafeBudgetToman = dailySafeBudgetToman
             )
             _showPaydayBackupModal.value = false
-            showBanner("تنظیمات ماه حقوقی و نرخ لحظه‌ای طلای ۱۸ عیار بروزرسانی شد.")
+            showBanner("تنظیمات ماه حقوقی و نرخ طلا ذخیره شد.")
         }
     }
 
@@ -301,7 +301,7 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
                 _showPaydayBackupModal.value = false
                 showBanner("پشتیبان دیتابیس آفلاین با موفقیت بازیابی شد.")
             } else {
-                showBanner("خطا در ساختار فایل پشتیبان JSON. لطفاً متن را بررسی کنید.")
+                showBanner("خطا در ساختار فایل پشتیبان JSON.")
             }
         }
     }
@@ -329,7 +329,7 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.addNewCommitment(category, title, counterparty, amountToman, dueDateStr, sayyadId)
             _showAddCommitmentModal.value = false
-            showBanner("تعهد جدید «$title» در سپر تعهدات ثبت شد.")
+            showBanner("تعهد جدید «$title» ثبت شد.")
         }
     }
 
@@ -353,15 +353,7 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.convertSurplusToGold(amountToman)
             _showConvertGoldModal.value = false
-            showBanner("مبلغ ${PersianNumberUtils.formatToman(amountToman, true)} از مازاد تراز به سپر طلای ۱۸ عیار افزوده شد.")
-        }
-    }
-
-    fun toggleDailyAutoSaveGold(enabled: Boolean) {
-        viewModelScope.launch {
-            repository.toggleDailyAutoSaveGold(enabled)
-            val status = if (enabled) "فعال" else "غیرفعال"
-            showBanner("پس‌انداز خودکار روزانه طلا $status شد.")
+            showBanner("مبلغ ${PersianNumberUtils.formatToman(amountToman, true)} به قلک طلای ۱۸ عیار افزوده شد.")
         }
     }
 
@@ -372,13 +364,20 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
     private fun showBanner(message: String) {
         viewModelScope.launch {
             _statusBannerMessage.value = message
-            delay(4500L)
+            delay(4000L)
             if (_statusBannerMessage.value == message) {
                 _statusBannerMessage.value = null
             }
         }
     }
 }
+
+private data class Tuple4<A, B, C, D>(
+    val first: A,
+    val second: B,
+    val third: C,
+    val fourth: D
+)
 
 private data class Tuple5<A, B, C, D, E>(
     val first: A,

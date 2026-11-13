@@ -32,6 +32,16 @@ data class TransactionEntity(
 ) {
     val subtitle: String
         get() = "$weekdayDate • $timeStr • $cardInfo"
+
+    val shortBankName: String
+        get() = cardInfo
+            .replace("کارت", "")
+            .replace(Regex("[۰-۹0-9]+"), "")
+            .trim()
+            .ifEmpty { "بلو" }
+
+    val simpleSubtitle: String
+        get() = "$weekdayDate • $timeStr • $shortBankName"
 }
 
 @Entity(tableName = "commitments")

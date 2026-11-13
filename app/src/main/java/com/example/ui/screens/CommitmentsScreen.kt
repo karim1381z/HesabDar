@@ -18,12 +18,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalance
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CallReceived
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.Button
@@ -38,38 +37,29 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.CommitmentEntity
 import com.example.domain.PersianNumberUtils
-import com.example.ui.CommitmentTab
 import com.example.ui.theme.AlabasterSilk
 import com.example.ui.theme.NishapurTurquoise
 import com.example.ui.theme.NishapurTurquoiseBright
+import com.example.ui.theme.NishapurTurquoiseDeep
 import com.example.ui.theme.NishapurTurquoiseSoft
-import com.example.ui.theme.OrosiHairline
 import com.example.ui.theme.OrosiOnSurfaceVariant
-import com.example.ui.theme.OrosiSurfaceContainer
 import com.example.ui.theme.OrosiSurfaceHigh
-import com.example.ui.theme.PersianLapis
-import com.example.ui.theme.PersianLapisLight
 import com.example.ui.theme.RoyalAmethyst
-import com.example.ui.theme.RoyalAmethystBright
 import com.example.ui.theme.RoyalAmethystContainer
 import com.example.ui.theme.RoyalAmethystDeep
 import com.example.ui.theme.RoyalAmethystSoft
-import com.example.ui.theme.SaffronGold
 import com.example.ui.theme.SaffronGoldBright
-import com.example.ui.theme.SaffronGoldLight
 
 @Composable
 fun CommitmentsScreen(
-    selectedTab: CommitmentTab,
     commitments: List<CommitmentEntity>,
-    onSelectTab: (CommitmentTab) -> Unit,
     onToggleSettled: (CommitmentEntity) -> Unit,
     onOpenAddCommitmentModal: () -> Unit,
     onBackToDashboard: () -> Unit,
@@ -78,136 +68,77 @@ fun CommitmentsScreen(
     BackHandler(onBack = onBackToDashboard)
 
     val issuedCheque = commitments.firstOrNull { it.category == "SAYYAD_ISSUED" }
-    val receivedCheque = commitments.firstOrNull { it.category == "SAYYAD_RECEIVED" }
-    val loanInstallment = commitments.firstOrNull { it.category == "LOAN_INSTALLMENT" }
-
-    val tabItems = when (selectedTab) {
-        CommitmentTab.SAYYAD -> commitments.filter {
-            it.category == "SAYYAD_ISSUED" || it.category == "SAYYAD_RECEIVED" || it.category == "LOAN_INSTALLMENT"
-        }
-        CommitmentTab.INSTALLMENTS -> commitments.filter { it.category == "LOAN_INSTALLMENT" }
-        CommitmentTab.DONG -> commitments.filter { it.category == "DONG" }
-    }
+    val otherCommitments = commitments.filter { it.id != issuedCheque?.id }
 
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
             .testTag("commitments_screen"),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. Segmented Tabs: چک صیادی | اقساط وام | دُنگ
+        // 1. One Reassuring Green/Turquoise Banner at the Top
         item {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(OrosiSurfaceContainer)
-                    .border(1.dp, OrosiHairline, RoundedCornerShape(16.dp))
-                    .padding(4.dp)
-                    .testTag("commitments_segmented_tabs"),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(NishapurTurquoiseDeep.copy(alpha = 0.65f))
+                    .border(1.dp, NishapurTurquoiseBright.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                    .padding(horizontal = 18.dp, vertical = 16.dp)
+                    .testTag("reassuring_commitments_banner"),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                CommitmentTab.entries.forEach { tab ->
-                    val isSelected = selectedTab == tab
-                    val count = when (tab) {
-                        CommitmentTab.SAYYAD -> commitments.count { it.category.startsWith("SAYYAD") }
-                        CommitmentTab.INSTALLMENTS -> commitments.count { it.category == "LOAN_INSTALLMENT" }
-                        CommitmentTab.DONG -> commitments.count { it.category == "DONG" && !it.isSettled }
-                    }
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(
-                                if (isSelected) RoyalAmethyst else Color.Transparent
-                            )
-                            .clickable { onSelectTab(tab) }
-                            .padding(vertical = 10.dp)
-                            .testTag("commitment_tab_${tab.name}")
-                    ) {
-                        Text(
-                            text = "${tab.title} (${PersianNumberUtils.toPersianDigits(count.toString())})",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = if (isSelected) AlabasterSilk else OrosiOnSurfaceVariant,
-                            textAlign = TextAlign.Center
-                        )
-                    }
-                }
+                Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = null,
+                    tint = NishapurTurquoiseBright,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    text = "خیالت راحت! مبلغ تمام تعهدات این ماه از حقوقت کنار گذاشته شده",
+                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                    color = AlabasterSilk
+                )
             }
         }
 
-        // 2. Purple Sayyad Cheque Hero Card: ۱۵,۰۰۰,۰۰۰ تومان
-        if (selectedTab == CommitmentTab.SAYYAD && issuedCheque != null) {
+        // 2. Purple Sayyad Cheque Hero Card (۱۵,۰۰۰,۰۰۰ تومان)
+        if (issuedCheque != null) {
             item {
-                PurpleSayyadChequeHeroCard(
+                SpaciousPurpleSayyadCard(
                     cheque = issuedCheque,
                     onToggleSettled = { onToggleSettled(issuedCheque) }
                 )
             }
         }
 
-        // 3. Received Cheque + Bank Installment Cards (or Filtered Tab List)
-        if (selectedTab == CommitmentTab.SAYYAD) {
-            if (receivedCheque != null) {
-                item {
-                    CommitmentVaultCard(
-                        commitment = receivedCheque,
-                        badgeLabel = "چک دریافتی صیادی",
-                        accentColor = NishapurTurquoiseBright,
-                        icon = Icons.Default.CallReceived,
-                        onToggleSettled = { onToggleSettled(receivedCheque) }
-                    )
-                }
+        // 3. Clean, Spacious Cards Below It with Zero Clutter
+        items(
+            items = otherCommitments,
+            key = { it.id }
+        ) { item ->
+            val (accentColor, icon) = when (item.category) {
+                "SAYYAD_RECEIVED" -> Pair(NishapurTurquoiseBright, Icons.Default.CallReceived)
+                "LOAN_INSTALLMENT" -> Pair(SaffronGoldBright, Icons.Default.AccountBalance)
+                "DONG" -> Pair(NishapurTurquoiseSoft, Icons.Default.Group)
+                else -> Pair(RoyalAmethystSoft, Icons.Default.VerifiedUser)
             }
-            if (loanInstallment != null) {
-                item {
-                    CommitmentVaultCard(
-                        commitment = loanInstallment,
-                        badgeLabel = "قسط وام بانکی",
-                        accentColor = SaffronGoldBright,
-                        icon = Icons.Default.AccountBalance,
-                        onToggleSettled = { onToggleSettled(loanInstallment) }
-                    )
-                }
-            }
-            // Any extra custom Sayyad cheques added by user
-            val extraSayyad = commitments.filter {
-                it.category.startsWith("SAYYAD") && it.id != issuedCheque?.id && it.id != receivedCheque?.id
-            }
-            items(extraSayyad, key = { it.id }) { item ->
-                CommitmentVaultCard(
-                    commitment = item,
-                    badgeLabel = if (item.category == "SAYYAD_RECEIVED") "چک دریافتی" else "چک صیادی صادره",
-                    accentColor = RoyalAmethystSoft,
-                    icon = Icons.Default.VerifiedUser,
-                    onToggleSettled = { onToggleSettled(item) }
-                )
-            }
-        } else {
-            items(tabItems, key = { it.id }) { item ->
-                val (badge, color, icon) = when (item.category) {
-                    "LOAN_INSTALLMENT" -> Triple("قسط وام بانکی", SaffronGoldBright, Icons.Default.AccountBalance)
-                    "DONG" -> Triple("سهم دُنگ دوستان", NishapurTurquoiseBright, Icons.Default.Group)
-                    else -> Triple("چک صیادی", RoyalAmethystSoft, Icons.Default.VerifiedUser)
-                }
-                CommitmentVaultCard(
-                    commitment = item,
-                    badgeLabel = badge,
-                    accentColor = color,
-                    icon = icon,
-                    onToggleSettled = { onToggleSettled(item) }
-                )
-            }
+            SpaciousCommitmentCard(
+                commitment = item,
+                accentColor = accentColor,
+                icon = icon,
+                onToggleSettled = { onToggleSettled(item) }
+            )
         }
 
-        // 4. Required Single-Plus Button: + ثبت و استعلام چک جدید
+        // 4. Clean Action Button: + ثبت و استعلام چک جدید
         item {
             Spacer(modifier = Modifier.height(4.dp))
             Button(
                 onClick = onOpenAddCommitmentModal,
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(18.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = RoyalAmethyst,
                     contentColor = AlabasterSilk
@@ -215,7 +146,7 @@ fun CommitmentsScreen(
                 contentPadding = PaddingValues(vertical = 16.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, RoyalAmethystSoft.copy(alpha = 0.6f), RoundedCornerShape(16.dp))
+                    .border(1.dp, RoyalAmethystSoft.copy(alpha = 0.55f), RoundedCornerShape(18.dp))
                     .testTag("add_new_cheque_button")
             ) {
                 Text(
@@ -223,13 +154,13 @@ fun CommitmentsScreen(
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 )
             }
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(20.dp))
         }
     }
 }
 
 @Composable
-private fun PurpleSayyadChequeHeroCard(
+private fun SpaciousPurpleSayyadCard(
     cheque: CommitmentEntity,
     onToggleSettled: () -> Unit
 ) {
@@ -253,7 +184,8 @@ private fun PurpleSayyadChequeHeroCard(
                 RoyalAmethystSoft.copy(alpha = 0.45f),
                 RoundedCornerShape(24.dp)
             )
-            .padding(20.dp)
+            .clickable(onClick = onToggleSettled)
+            .padding(22.dp)
             .testTag("purple_sayyad_cheque_card")
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
@@ -262,201 +194,106 @@ private fun PurpleSayyadChequeHeroCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .background(Color.White.copy(alpha = 0.12f))
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.VerifiedUser,
-                        contentDescription = null,
-                        tint = RoyalAmethystSoft,
-                        modifier = Modifier.size(15.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "چک صیادی بنفش (صادره)",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = AlabasterSilk
-                    )
-                }
-
+                Text(
+                    text = cheque.title,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = AlabasterSilk,
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = cheque.dueDateStr,
-                    style = MaterialTheme.typography.labelMedium,
+                    style = MaterialTheme.typography.bodySmall,
                     color = RoyalAmethystSoft
                 )
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
-            // Main Hero Amount: ۱۵,۰۰۰,۰۰۰ تومان
             Text(
                 text = PersianNumberUtils.formatToman(cheque.amountToman, showUnit = true),
                 style = MaterialTheme.typography.headlineLarge.copy(
                     fontWeight = FontWeight.Black,
-                    fontSize = 26.sp
+                    fontSize = 28.sp
                 ),
                 color = AlabasterSilk,
+                maxLines = 1,
+                softWrap = false,
                 modifier = Modifier.testTag("sayyad_hero_amount")
             )
 
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
             Text(
-                text = cheque.title,
-                style = MaterialTheme.typography.titleSmall,
-                color = AlabasterSilk
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = "${cheque.counterparty} • شناسه صیاد: ${cheque.sayyadId}",
+                text = if (cheque.isSettled) "✓ پاس شده" else cheque.counterparty,
                 style = MaterialTheme.typography.bodySmall,
-                color = RoyalAmethystSoft
+                color = if (cheque.isSettled) NishapurTurquoiseSoft else RoyalAmethystSoft
             )
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = cheque.statusText,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = NishapurTurquoiseSoft,
-                    modifier = Modifier.weight(1f)
-                )
-
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(
-                            if (cheque.isSettled) NishapurTurquoise.copy(alpha = 0.3f)
-                            else Color.White.copy(alpha = 0.14f)
-                        )
-                        .border(1.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(10.dp))
-                        .clickable(onClick = onToggleSettled)
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                ) {
-                    Text(
-                        text = if (cheque.isSettled) "پاس شده ✓" else "ثبت پاس شدن",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = AlabasterSilk
-                    )
-                }
-            }
         }
     }
 }
 
 @Composable
-private fun CommitmentVaultCard(
+private fun SpaciousCommitmentCard(
     commitment: CommitmentEntity,
-    badgeLabel: String,
     accentColor: Color,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: ImageVector,
     onToggleSettled: () -> Unit
 ) {
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
+            .clip(RoundedCornerShape(20.dp))
             .background(OrosiSurfaceHigh)
-            .border(1.dp, accentColor.copy(alpha = 0.35f), RoundedCornerShape(18.dp))
-            .padding(16.dp)
-            .testTag("commitment_card_${commitment.id}")
+            .border(1.dp, accentColor.copy(alpha = 0.30f), RoundedCornerShape(20.dp))
+            .clickable(onClick = onToggleSettled)
+            .padding(horizontal = 18.dp, vertical = 18.dp)
+            .testTag("commitment_card_${commitment.id}"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.weight(1f)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(accentColor.copy(alpha = 0.16f))
-                ) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = badgeLabel,
-                        tint = accentColor,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(10.dp))
-                Column {
-                    Text(
-                        text = badgeLabel,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = accentColor
-                    )
-                    Text(
-                        text = commitment.title,
-                        style = MaterialTheme.typography.titleSmall,
-                        color = AlabasterSilk
-                    )
-                }
-            }
-
-            Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    text = PersianNumberUtils.formatToman(commitment.amountToman, showUnit = true),
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = accentColor
-                )
-                Text(
-                    text = commitment.dueDateStr,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = OrosiOnSurfaceVariant
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(accentColor.copy(alpha = 0.15f))
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = commitment.title,
+                    tint = accentColor,
+                    modifier = Modifier.size(22.dp)
                 )
             }
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+            Spacer(modifier = Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = commitment.counterparty,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = OrosiOnSurfaceVariant
-                )
-                Text(
-                    text = commitment.statusText,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (commitment.isSettled) NishapurTurquoiseBright else PersianLapisLight
-                )
-            }
-
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(
-                        if (commitment.isSettled) NishapurTurquoise.copy(alpha = 0.25f)
-                        else accentColor.copy(alpha = 0.16f)
-                    )
-                    .border(1.dp, accentColor.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
-                    .clickable(onClick = onToggleSettled)
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
-                    .testTag("settle_commitment_${commitment.id}")
-            ) {
-                Text(
-                    text = if (commitment.isSettled) "تسویه شد ✓" else "تسویه شد",
-                    style = MaterialTheme.typography.labelMedium,
+                    text = commitment.title,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                     color = AlabasterSilk
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = if (commitment.isSettled) "✓ تسویه شد" else commitment.dueDateStr,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (commitment.isSettled) NishapurTurquoiseBright else OrosiOnSurfaceVariant
                 )
             }
         }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Text(
+            text = PersianNumberUtils.formatToman(commitment.amountToman, showUnit = true),
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+            color = accentColor,
+            maxLines = 1,
+            softWrap = false
+        )
     }
 }

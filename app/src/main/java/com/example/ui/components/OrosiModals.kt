@@ -1,5 +1,12 @@
 package com.example.ui.components
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -48,16 +55,24 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.data.local.AppSettingsEntity
 import com.example.domain.ParsedSmsResult
 import com.example.domain.PersianNumberUtils
+import com.example.ui.VoiceUiState
 import com.example.ui.theme.AlabasterSilk
 import com.example.ui.theme.NishapurTurquoise
 import com.example.ui.theme.NishapurTurquoiseBright
+import com.example.ui.theme.NishapurTurquoiseDeep
 import com.example.ui.theme.NishapurTurquoiseSoft
 import com.example.ui.theme.OrosiHairline
 import com.example.ui.theme.OrosiOnSurfaceVariant
@@ -67,11 +82,229 @@ import com.example.ui.theme.OrosiSurfaceLow
 import com.example.ui.theme.PersianLapis
 import com.example.ui.theme.PersianLapisLight
 import com.example.ui.theme.RoyalAmethyst
-import com.example.ui.theme.RoyalAmethystSoft
-import com.example.ui.theme.RubyRoseSoft
 import com.example.ui.theme.SaffronGold
 import com.example.ui.theme.SaffronGoldBright
 import com.example.ui.theme.SaffronGoldLight
+import kotlin.math.sin
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun VoiceOverlayBottomSheet(
+    voiceState: VoiceUiState,
+    onSimulateVoiceRecord: () -> Unit,
+    onConfirmVoiceEntry: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val infiniteTransition = rememberInfiniteTransition(label = "voiceOverlayWave")
+    val phase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 6.28f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1300, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "wavePhase"
+    )
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = OrosiSurfaceLow,
+        contentColor = AlabasterSilk
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 32.dp)
+                .testTag("voice_overlay_sheet"),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // 1. Glowing Turquoise Audio Wave (Tappable to cycle/record spoken sentence)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                NishapurTurquoiseDeep,
+                                PersianLapis
+                            )
+                        )
+                    )
+                    .border(
+                        1.dp,
+                        NishapurTurquoiseBright.copy(alpha = 0.50f),
+                        RoundedCornerShape(24.dp)
+                    )
+                    .clickable { onSimulateVoiceRecord() }
+                    .padding(vertical = 26.dp, horizontal = 20.dp)
+                    .testTag("voice_record_button"),
+                contentAlignment = Alignment.Center
+            ) {
+                Canvas(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(68.dp)
+                ) {
+                    val barCount = 26
+                    val totalWidth = size.width
+                    val spacing = totalWidth / (barCount * 1.8f)
+                    val barWidth = spacing * 0.85f
+                    val centerY = size.height / 2f
+
+                    for (i in 0 until barCount) {
+                        val norm = i.toFloat() / barCount.toFloat()
+                        val envelope = sin(norm * Math.PI).toFloat()
+                        val dynamicWave = 0.30f + 0.65f * kotlin.math.abs(sin(phase + i * 0.45f))
+                        val barHeight = (size.height * 0.88f * envelope * dynamicWave).coerceAtLeast(10f)
+                        val x = (totalWidth - (barCount * (barWidth + spacing))) / 2f + i * (barWidth + spacing)
+
+                        drawRoundRect(
+                            color = if (i % 2 == 0) NishapurTurquoiseBright else NishapurTurquoiseSoft.copy(alpha = 0.78f),
+                            topLeft = Offset(x, centerY - barHeight / 2f),
+                            size = Size(barWidth, barHeight),
+                            cornerRadius = CornerRadius(barWidth / 2f, barWidth / 2f)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(22.dp))
+
+            // 2. The Spoken Sentence
+            Text(
+                text = "«${voiceState.recognizedText}»",
+                style = MaterialTheme.typography.titleLarge.copy(
+                    lineHeight = 30.sp,
+                    fontWeight = FontWeight.Bold
+                ),
+                color = AlabasterSilk,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp)
+                    .testTag("recognized_speech_text")
+            )
+
+            Spacer(modifier = Modifier.height(26.dp))
+
+            // 3. One Big Button ("تأیید")
+            Button(
+                onClick = onConfirmVoiceEntry,
+                shape = RoundedCornerShape(18.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = NishapurTurquoise,
+                    contentColor = AlabasterSilk
+                ),
+                contentPadding = PaddingValues(vertical = 18.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, NishapurTurquoiseBright, RoundedCornerShape(18.dp))
+                    .testTag("confirm_voice_entry_button")
+            ) {
+                Text(
+                    text = "تأیید",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.ExtraBold)
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun HeroMathBreakdownBottomSheet(
+    settings: AppSettingsEntity,
+    reservedCommitmentsToman: Long,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = OrosiSurfaceLow,
+        contentColor = AlabasterSilk
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 32.dp)
+                .testTag("hero_math_sheet"),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Text(
+                text = "جزئیات محاسبه سهم خرج امروزت",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                color = AlabasterSilk
+            )
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(OrosiSurfaceContainer)
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "تراز آزاد ماه حقوقی",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = OrosiOnSurfaceVariant
+                )
+                Text(
+                    text = PersianNumberUtils.formatToman(settings.monthlyBalanceToman, showUnit = true),
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = NishapurTurquoiseSoft
+                )
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(OrosiSurfaceContainer)
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "کنار گذاشته برای قسط و چک",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = OrosiOnSurfaceVariant
+                )
+                Text(
+                    text = PersianNumberUtils.formatToman(reservedCommitmentsToman, showUnit = true),
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = SaffronGoldLight
+                )
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(PersianLapis)
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "سهم خرجِ امروزت",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = PersianLapisLight
+                )
+                Text(
+                    text = PersianNumberUtils.formatToman(settings.dailySafeBudgetToman, showUnit = true),
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black),
+                    color = AlabasterSilk
+                )
+            }
+        }
+    }
+}
 
 data class BankSmsSample(
     val label: String,
@@ -146,7 +379,7 @@ fun SmsSimulatorBottomSheet(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "شبیه‌ساز پیامک بانکی (موتور آفلاین)",
+                        text = "شبیه‌ساز پیامک بانکی (آفلاین)",
                         style = MaterialTheme.typography.titleLarge,
                         color = AlabasterSilk
                     )
@@ -160,15 +393,8 @@ fun SmsSimulatorBottomSheet(
                 }
             }
 
-            Text(
-                text = "تبدیل خودکار ریال به تومان (تقسیم بر ۱۰)، استخراج روز هفته و کارت، حذف کارمزد خرد و تشخیص کارت‌به‌کارت خودی",
-                style = MaterialTheme.typography.bodySmall,
-                color = OrosiOnSurfaceVariant
-            )
+            Spacer(modifier = Modifier.height(10.dp))
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Quick Bank Presets
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -222,7 +448,6 @@ fun SmsSimulatorBottomSheet(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Live Parsed Preview Card
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -231,12 +456,6 @@ fun SmsSimulatorBottomSheet(
                     .border(1.dp, NishapurTurquoise.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
                     .padding(14.dp)
             ) {
-                Text(
-                    text = "پیش‌نمایش استخراج آنی:",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = NishapurTurquoiseSoft
-                )
-                Spacer(modifier = Modifier.height(6.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
@@ -247,25 +466,9 @@ fun SmsSimulatorBottomSheet(
                         color = OrosiOnSurfaceVariant
                     )
                     Text(
-                        text = "${PersianNumberUtils.formatToman(preview.amountToman, true)} (از ${PersianNumberUtils.formatToman(preview.rawAmountRial)} ریال)",
+                        text = PersianNumberUtils.formatToman(preview.amountToman, true),
                         style = MaterialTheme.typography.titleSmall,
                         color = AlabasterSilk
-                    )
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "زیرنویس استاندارد:",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = OrosiOnSurfaceVariant
-                    )
-                    Text(
-                        text = preview.subtitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = NishapurTurquoiseBright
                     )
                 }
                 Spacer(modifier = Modifier.height(4.dp))
@@ -280,12 +483,12 @@ fun SmsSimulatorBottomSheet(
 
             Button(
                 onClick = { onProcessSms(rawSmsText) },
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(16.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = NishapurTurquoise,
                     contentColor = AlabasterSilk
                 ),
-                contentPadding = PaddingValues(vertical = 14.dp),
+                contentPadding = PaddingValues(vertical = 15.dp),
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("process_sms_button")
@@ -293,7 +496,7 @@ fun SmsSimulatorBottomSheet(
                 Icon(imageVector = Icons.Default.Check, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "پردازش پیامک و بروزرسانی خیال راحت امروز",
+                    text = "پردازش پیامک",
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 )
             }
@@ -393,7 +596,7 @@ fun PaydayAndBackupBottomSheet(
                 OutlinedTextField(
                     value = dailySafeStr,
                     onValueChange = { dailySafeStr = PersianNumberUtils.toPersianDigits(it) },
-                    label = { Text("خیال راحت امروز (تومان)") },
+                    label = { Text("سهم خرج امروز (تومان)") },
                     modifier = Modifier.weight(1.4f),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = NishapurTurquoiseBright,
@@ -428,18 +631,12 @@ fun PaydayAndBackupBottomSheet(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "تشخیص خودکار آغاز ماه حقوقی با پیامک حقوق",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = AlabasterSilk
-                    )
-                    Text(
-                        text = "با دریافت پیامک واریز حقوق، تراز ماه به صورت خودکار بازتنظیم می‌شود",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = OrosiOnSurfaceVariant
-                    )
-                }
+                Text(
+                    text = "تشخیص خودکار واریز حقوق از پیامک",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = AlabasterSilk,
+                    modifier = Modifier.weight(1f)
+                )
                 Switch(
                     checked = autoDetectSalary,
                     onCheckedChange = { autoDetectSalary = it },
@@ -473,14 +670,13 @@ fun PaydayAndBackupBottomSheet(
                 Icon(imageVector = Icons.Default.Check, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "ذخیره تنظیمات ماه حقوقی و نرخ طلا",
+                    text = "ذخیره تنظیمات",
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 )
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Local Database Backup / Restore Section
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -531,14 +727,10 @@ fun PaydayAndBackupBottomSheet(
                 OutlinedTextField(
                     value = editableBackupJson,
                     onValueChange = { editableBackupJson = it },
-                    label = { Text("پشتیبان JSON دیتابیس محلی (قابل کپی یا جایگذاری)") },
+                    label = { Text("پشتیبان JSON دیتابیس محلی") },
                     maxLines = 6,
                     modifier = Modifier.fillMaxWidth(),
-                    textStyle = MaterialTheme.typography.bodySmall,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = NishapurTurquoiseBright,
-                        unfocusedBorderColor = OrosiHairline
-                    )
+                    textStyle = MaterialTheme.typography.bodySmall
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Button(
@@ -550,7 +742,7 @@ fun PaydayAndBackupBottomSheet(
                     ),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("بازیابی اطلاعات از JSON بالا")
+                    Text("بازیابی اطلاعات")
                 }
             }
         }
@@ -587,48 +779,16 @@ fun AddCommitmentBottomSheet(
                 .testTag("add_commitment_sheet")
         ) {
             Text(
-                text = "+ ثبت و استعلام چک جدید / تعهد مالی",
+                text = "+ ثبت و استعلام چک جدید",
                 style = MaterialTheme.typography.titleLarge,
                 color = AlabasterSilk
             )
             Spacer(modifier = Modifier.height(12.dp))
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                val cats = listOf(
-                    "SAYYAD_ISSUED" to "چک صادره",
-                    "SAYYAD_RECEIVED" to "چک دریافتی",
-                    "LOAN_INSTALLMENT" to "قسط وام",
-                    "DONG" to "دُنگ"
-                )
-                cats.forEach { (key, label) ->
-                    val selected = category == key
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(if (selected) RoyalAmethyst else OrosiSurfaceContainer)
-                            .clickable { category = key }
-                            .padding(vertical = 8.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = label,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = AlabasterSilk
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
             OutlinedTextField(
                 value = title,
                 onValueChange = { title = it },
-                label = { Text("عنوان چک یا تعهد") },
+                label = { Text("عنوان چک یا قسط") },
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(modifier = Modifier.height(8.dp))
@@ -640,23 +800,9 @@ fun AddCommitmentBottomSheet(
             )
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedTextField(
-                value = counterparty,
-                onValueChange = { counterparty = it },
-                label = { Text("طرف حساب / بانک") },
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            OutlinedTextField(
                 value = dueDateStr,
                 onValueChange = { dueDateStr = it },
                 label = { Text("تاریخ سررسید") },
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            OutlinedTextField(
-                value = sayyadId,
-                onValueChange = { sayyadId = PersianNumberUtils.toPersianDigits(it) },
-                label = { Text("شناسه ۱۶ رقمی صیادی") },
                 modifier = Modifier.fillMaxWidth()
             )
 
@@ -680,7 +826,7 @@ fun AddCommitmentBottomSheet(
                 Icon(imageVector = Icons.Default.VerifiedUser, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "استعلام وضعیت سفید و ثبت در تعهدات",
+                    text = "تأیید و ثبت چک",
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 )
             }
@@ -718,19 +864,12 @@ fun ConvertSurplusToGoldBottomSheet(
                 style = MaterialTheme.typography.titleLarge,
                 color = AlabasterSilk
             )
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = "نرخ لحظه‌ای طلای ۱۸ عیار: ${PersianNumberUtils.formatToman(settings.goldPrice18kToman, true)}",
-                style = MaterialTheme.typography.bodySmall,
-                color = SaffronGoldLight
-            )
-
             Spacer(modifier = Modifier.height(12.dp))
 
             OutlinedTextField(
                 value = amountStr,
                 onValueChange = { amountStr = PersianNumberUtils.toPersianDigits(it) },
-                label = { Text("مبلغ تبدیل از مازاد تراز (تومان)") },
+                label = { Text("مبلغ تبدیل (تومان)") },
                 modifier = Modifier.fillMaxWidth(),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = SaffronGoldBright,
@@ -741,7 +880,7 @@ fun ConvertSurplusToGoldBottomSheet(
             Spacer(modifier = Modifier.height(10.dp))
 
             Text(
-                text = "معادل طلای دریافتی: ${PersianNumberUtils.formatDecimal(equivalentGrams, 3)} گرم طلای ۱۸ عیار",
+                text = "معادل: ${PersianNumberUtils.formatDecimal(equivalentGrams, 3)} گرم طلای ۱۸ عیار",
                 style = MaterialTheme.typography.titleSmall,
                 color = NishapurTurquoiseBright
             )
@@ -763,7 +902,7 @@ fun ConvertSurplusToGoldBottomSheet(
                 Icon(imageVector = Icons.Default.CurrencyExchange, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "تایید تبدیل و افزودن به سپر تورمی",
+                    text = "تأیید",
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 )
             }

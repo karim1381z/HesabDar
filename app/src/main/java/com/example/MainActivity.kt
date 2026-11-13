@@ -17,8 +17,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -28,13 +26,13 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.EventNote
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -48,7 +46,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -59,27 +56,25 @@ import com.example.ui.OrosiUiState
 import com.example.ui.OrosiViewModel
 import com.example.ui.components.AddCommitmentBottomSheet
 import com.example.ui.components.ConvertSurplusToGoldBottomSheet
+import com.example.ui.components.HeroMathBreakdownBottomSheet
 import com.example.ui.components.PaydayAndBackupBottomSheet
 import com.example.ui.components.SmsSimulatorBottomSheet
+import com.example.ui.components.VoiceOverlayBottomSheet
 import com.example.ui.screens.CommitmentsScreen
 import com.example.ui.screens.DashboardScreen
 import com.example.ui.screens.InflationShieldScreen
-import com.example.ui.screens.VoiceEntryScreen
 import com.example.ui.theme.AlabasterSilk
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.NishapurTurquoise
 import com.example.ui.theme.NishapurTurquoiseBright
 import com.example.ui.theme.NishapurTurquoiseDeep
-import com.example.ui.theme.NishapurTurquoiseSoft
 import com.example.ui.theme.OrosiHairline
 import com.example.ui.theme.OrosiOnSurfaceVariant
 import com.example.ui.theme.OrosiSurface
 import com.example.ui.theme.OrosiSurfaceContainer
-import com.example.ui.theme.OrosiSurfaceLow
 import com.example.ui.theme.OrosiSurfaceLowest
 import com.example.ui.theme.PersianLapis
 import com.example.ui.theme.PersianLapisLight
-import com.example.ui.theme.SaffronGoldBright
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -116,10 +111,29 @@ fun OrosiFinanceApp(
         topBar = {
             OrosiTopHeader(
                 currentScreen = uiState.currentScreen,
-                paydayLabel = uiState.settings.paydayCycleLabel,
                 onProfileClick = { viewModel.setShowPaydayBackupModal(true) },
                 onBellClick = { viewModel.setShowSmsSimulator(true) }
             )
+        },
+        floatingActionButton = {
+            if (uiState.currentScreen == OrosiScreen.DASHBOARD) {
+                FloatingActionButton(
+                    onClick = { viewModel.openVoiceOverlayNew() },
+                    shape = CircleShape,
+                    containerColor = NishapurTurquoise,
+                    contentColor = AlabasterSilk,
+                    modifier = Modifier
+                        .size(60.dp)
+                        .border(1.5.dp, NishapurTurquoiseBright, CircleShape)
+                        .testTag("floating_voice_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Mic,
+                        contentDescription = "ثبت صوتی",
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+            }
         },
         bottomBar = {
             OrosiBottomNavigationBar(
@@ -139,12 +153,12 @@ fun OrosiFinanceApp(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                        .padding(horizontal = 20.dp, vertical = 6.dp)
                         .clip(RoundedCornerShape(14.dp))
                         .background(NishapurTurquoiseDeep)
                         .border(1.dp, NishapurTurquoiseBright, RoundedCornerShape(14.dp))
                         .clickable { viewModel.dismissBanner() }
-                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
                         .testTag("status_banner"),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -167,32 +181,14 @@ fun OrosiFinanceApp(
                         DashboardScreen(
                             settings = uiState.settings,
                             transactions = uiState.transactions,
-                            totalReservedCommitmentsToman = reservedCommitmentsToman,
-                            onNavigate = { viewModel.navigateTo(it) },
-                            onOpenSmsSimulator = { viewModel.setShowSmsSimulator(true) },
+                            onHeroCardClick = { viewModel.setShowHeroMathSheet(true) },
                             onUntaggedMicClick = { tx -> viewModel.openVoiceForUntaggedTransaction(tx) }
-                        )
-                    }
-
-                    OrosiScreen.VOICE_ENTRY -> {
-                        VoiceEntryScreen(
-                            voiceState = uiState.voiceState,
-                            onSpeechChange = { viewModel.onVoiceSpeechChanged(it) },
-                            onSimulateVoiceRecord = { phrase -> viewModel.triggerVoiceSimulation(phrase) },
-                            onUpdateExtractedFields = { store, purpose, dong, friend ->
-                                viewModel.updateExtractedVoiceFields(store, purpose, dong, friend)
-                            },
-                            onClearUntaggedTarget = { viewModel.clearTargetUntaggedTransaction() },
-                            onConfirmVoiceEntry = { viewModel.confirmVoiceEntry() },
-                            onBackToDashboard = { viewModel.navigateTo(OrosiScreen.DASHBOARD) }
                         )
                     }
 
                     OrosiScreen.COMMITMENTS -> {
                         CommitmentsScreen(
-                            selectedTab = uiState.selectedCommitmentTab,
                             commitments = uiState.commitments,
-                            onSelectTab = { viewModel.selectCommitmentTab(it) },
                             onToggleSettled = { viewModel.toggleCommitmentSettled(it) },
                             onOpenAddCommitmentModal = { viewModel.setShowAddCommitmentModal(true) },
                             onBackToDashboard = { viewModel.navigateTo(OrosiScreen.DASHBOARD) }
@@ -203,7 +199,6 @@ fun OrosiFinanceApp(
                         InflationShieldScreen(
                             settings = uiState.settings,
                             onOpenConvertGoldModal = { viewModel.setShowConvertGoldModal(true) },
-                            onToggleDailyAutoSave = { viewModel.toggleDailyAutoSaveGold(it) },
                             onBackToDashboard = { viewModel.navigateTo(OrosiScreen.DASHBOARD) }
                         )
                     }
@@ -212,7 +207,25 @@ fun OrosiFinanceApp(
         }
     }
 
-    // Interactive Offline Modals
+    // Effortless Voice Overlay Bottom Sheet
+    if (uiState.showVoiceOverlaySheet) {
+        VoiceOverlayBottomSheet(
+            voiceState = uiState.voiceState,
+            onSimulateVoiceRecord = { viewModel.triggerVoiceSimulation(null) },
+            onConfirmVoiceEntry = { viewModel.confirmVoiceEntry() },
+            onDismiss = { viewModel.dismissVoiceOverlay() }
+        )
+    }
+
+    // Optional Hero Card Math Modal
+    if (uiState.showHeroMathSheet) {
+        HeroMathBreakdownBottomSheet(
+            settings = uiState.settings,
+            reservedCommitmentsToman = reservedCommitmentsToman,
+            onDismiss = { viewModel.setShowHeroMathSheet(false) }
+        )
+    }
+
     if (uiState.showSmsSimulatorModal) {
         SmsSimulatorBottomSheet(
             onPreviewSms = { viewModel.previewBankSms(it) },
@@ -255,7 +268,6 @@ fun OrosiFinanceApp(
 @Composable
 private fun OrosiTopHeader(
     currentScreen: OrosiScreen,
-    paydayLabel: String,
     onProfileClick: () -> Unit,
     onBellClick: () -> Unit
 ) {
@@ -263,11 +275,11 @@ private fun OrosiTopHeader(
         modifier = Modifier
             .fillMaxWidth()
             .windowInsetsPadding(WindowInsets.statusBars)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(horizontal = 20.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Profile Button (Opens Payday Cycle & Backup Settings)
+        // Right side (in RTL): Clean Profile Icon + Screen Title
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
@@ -275,7 +287,7 @@ private fun OrosiTopHeader(
                 .background(OrosiSurfaceContainer)
                 .border(1.dp, OrosiHairline, RoundedCornerShape(50))
                 .clickable(onClick = onProfileClick)
-                .padding(horizontal = 10.dp, vertical = 6.dp)
+                .padding(horizontal = 12.dp, vertical = 8.dp)
                 .testTag("profile_settings_button")
         ) {
             Box(
@@ -293,22 +305,15 @@ private fun OrosiTopHeader(
                     modifier = Modifier.size(19.dp)
                 )
             }
-            Spacer(modifier = Modifier.width(8.dp))
-            Column {
-                Text(
-                    text = currentScreen.persianTitle,
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                    color = AlabasterSilk
-                )
-                Text(
-                    text = "ماه حقوقی: $paydayLabel",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = NishapurTurquoiseSoft
-                )
-            }
+            Spacer(modifier = Modifier.width(10.dp))
+            Text(
+                text = currentScreen.persianTitle,
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                color = AlabasterSilk
+            )
         }
 
-        // Notification Bell Button (Opens Offline Bank SMS Simulator)
+        // Left side (in RTL): Unclipped Notification Bell Button with generous margin
         Surface(
             onClick = onBellClick,
             shape = CircleShape,
@@ -345,10 +350,9 @@ private fun OrosiBottomNavigationBar(
             .testTag("bottom_navigation_bar")
     ) {
         val navItems = listOf(
-            Triple(OrosiScreen.DASHBOARD, "پیشخوان", Icons.Default.Dashboard),
-            Triple(OrosiScreen.VOICE_ENTRY, "ثبت صوتی", Icons.Default.Mic),
-            Triple(OrosiScreen.COMMITMENTS, "تعهدات و چک", Icons.Default.EventNote),
-            Triple(OrosiScreen.INFLATION_SHIELD, "سپر تورمی", Icons.Default.Shield)
+            Triple(OrosiScreen.DASHBOARD, "امروز من", Icons.Default.Dashboard),
+            Triple(OrosiScreen.COMMITMENTS, "قسط و چک", Icons.Default.EventNote),
+            Triple(OrosiScreen.INFLATION_SHIELD, "قلک طلا", Icons.Default.Shield)
         )
 
         navItems.forEach { (screen, label, icon) ->
@@ -365,7 +369,7 @@ private fun OrosiBottomNavigationBar(
                 label = {
                     Text(
                         text = label,
-                        style = MaterialTheme.typography.labelMedium.copy(
+                        style = MaterialTheme.typography.labelLarge.copy(
                             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
                         )
                     )
