@@ -28,22 +28,58 @@ data class TransactionEntity(
     val cardInfo: String,    // e.g., "کارت بلو ۶۲۱۹"
     val type: String,        // "EXPENSE", "INCOME", "SELF_TRANSFER", "GOLD_SAVE"
     val isUntagged: Boolean = false,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val balanceAfterToman: Long? = null,
+    val rawSmsBody: String = "",
+    val bankName: String = ""
 ) {
     val subtitle: String
         get() = "$weekdayDate • $timeStr • $cardInfo"
 
     val shortBankName: String
-        get() = cardInfo
-            .replace("کارت", "")
-            .replace("حساب", "")
-            .replace(Regex("[۰-۹0-9]+"), "")
-            .trim()
-            .ifEmpty { "بانک" }
+        get() = bankName.ifBlank {
+            cardInfo
+                .replace("کارت", "")
+                .replace("حساب", "")
+                .replace(Regex("[۰-۹0-9]+"), "")
+                .trim()
+                .ifEmpty { "بانک" }
+        }
 
     val simpleSubtitle: String
         get() = "$weekdayDate • $timeStr • $shortBankName"
+
+    val displayTitle: String
+        get() = when {
+            !isUntagged && purpose.isNotBlank() &&
+                purpose != "نیازمند تکمیل صوتی" &&
+                purpose != "برداشت کارتی / خرید" &&
+                purpose != "واریز به حساب" -> {
+                if (storeName.isNotBlank() &&
+                    storeName != "نامشخص" &&
+                    storeName != shortBankName &&
+                    storeName != bankName &&
+                    !purpose.contains(storeName)
+                ) {
+                    "$purpose ($storeName)"
+                } else {
+                    purpose
+                }
+            }
+            else -> title
+        }
 }
+
+@Entity(tableName = "bank_accounts")
+data class BankAccountEntity(
+    @PrimaryKey val bankName: String, // e.g., "بلو", "سپه", "پاسارگاد", "ملت", "ویپاد"
+    val nameEn: String = "",
+    val balanceToman: Long = 0L,
+    val isTankhah: Boolean = true,
+    val cardLast4: String = "",
+    val lastUpdatedTimestamp: Long = System.currentTimeMillis(),
+    val isManual: Boolean = false
+)
 
 @Entity(tableName = "commitments")
 data class CommitmentEntity(
@@ -65,12 +101,14 @@ data class AppSettingsEntity(
     val dailySafeBudgetToman: Long = 680_000L,
     val monthlyBalanceToman: Long = 18_450_000L,
     val paydayStartDay: Int = 1,
-    val paydayCycleLabel: String = "۱ آبان تا ۳۰ آبان ۱۴۰۳",
+    val paydayCycleLabel: String = "۱ آبان تا ۳۰ آبان ۱۴۰۴",
     val autoDetectSalary: Boolean = true,
     val goldPrice18kToman: Long = 4_360_000L,
     val goldReserveToman: Long = 48_500_000L,
     val goldGrams: Double = 11.12,
-    val dailyAutoSaveEnabled: Boolean = true
+    val dailyAutoSaveEnabled: Boolean = true,
+    val hideAmounts: Boolean = false,
+    val onlyTankhahMode: Boolean = false
 )
 
 @Dao
@@ -98,6 +136,27 @@ interface OrosiDao {
 
     @Query("DELETE FROM transactions")
     suspend fun clearAllTransactions()
+
+    @Query("SELECT * FROM bank_accounts ORDER BY balanceToman DESC, lastUpdatedTimestamp DESC")
+    fun observeBankAccounts(): Flow<List<BankAccountEntity>>
+
+    @Query("SELECT * FROM bank_accounts ORDER BY balanceToman DESC, lastUpdatedTimestamp DESC")
+    suspend fun getAllBankAccountsNow(): List<BankAccountEntity>
+
+    @Query("SELECT * FROM bank_accounts WHERE bankName = :bankName LIMIT 1")
+    suspend fun getBankAccountByName(bankName: String): BankAccountEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertBankAccount(account: BankAccountEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertBankAccounts(accounts: List<BankAccountEntity>)
+
+    @Query("DELETE FROM bank_accounts WHERE bankName = :bankName")
+    suspend fun deleteBankAccount(bankName: String)
+
+    @Query("DELETE FROM bank_accounts")
+    suspend fun clearAllBankAccounts()
 
     @Query("SELECT * FROM commitments ORDER BY isSettled ASC, timestamp DESC, id DESC")
     fun observeCommitments(): Flow<List<CommitmentEntity>>
@@ -131,8 +190,13 @@ interface OrosiDao {
 }
 
 @Database(
-    entities = [TransactionEntity::class, CommitmentEntity::class, AppSettingsEntity::class],
-    version = 1,
+    entities = [
+        TransactionEntity::class,
+        BankAccountEntity::class,
+        CommitmentEntity::class,
+        AppSettingsEntity::class
+    ],
+    version = 2,
     exportSchema = false
 )
 abstract class OrosiDatabase : RoomDatabase() {
@@ -147,7 +211,7 @@ abstract class OrosiDatabase : RoomDatabase() {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     OrosiDatabase::class.java,
-                    "orosi_finance_v3_jibeman.db"
+                    "orosi_finance_v4_jibeman.db"
                 ).fallbackToDestructiveMigration().build()
                 INSTANCE = instance
                 instance

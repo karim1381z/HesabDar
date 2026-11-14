@@ -57,7 +57,15 @@ object PersianNumberUtils {
         return (amountToman / 1_000L) * 1_000L
     }
 
-    fun formatToman(amount: Long, showUnit: Boolean = false, showSign: Boolean = false): String {
+    fun formatToman(
+        amount: Long,
+        showUnit: Boolean = false,
+        showSign: Boolean = false,
+        hideAmount: Boolean = false
+    ): String {
+        if (hideAmount) {
+            return if (showUnit) "**** تومان" else "****"
+        }
         val absVal = kotlin.math.abs(amount)
         val symbols = DecimalFormatSymbols(Locale.US).apply {
             groupingSeparator = ','
@@ -99,8 +107,17 @@ data class JalaliDateTime(
     val weekdayDate: String
         get() = "$weekdayName ${PersianNumberUtils.toPersianDigits(day.toString())} $monthName"
 
+    val dateWithYear: String
+        get() = "${PersianNumberUtils.toPersianDigits(day.toString())} $monthName ${PersianNumberUtils.toPersianDigits(year.toString())}"
+
     val fullWeekdayDateWithYear: String
         get() = "$weekdayName ${PersianNumberUtils.toPersianDigits(day.toString())} $monthName ${PersianNumberUtils.toPersianDigits(year.toString())}"
+
+    val monthYearLabel: String
+        get() = "$monthName ${PersianNumberUtils.toPersianDigits(year.toString())}"
+
+    val yearMonthKey: Int
+        get() = year * 100 + month
 
     val timeStr: String
         get() = PersianNumberUtils.toPersianDigits(String.format(Locale.US, "%02d:%02d", hour, minute))
@@ -111,6 +128,8 @@ object JalaliCalendarUtils {
         "", "فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور",
         "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"
     )
+
+    fun monthNameOf(month: Int): String = persianMonths.getOrElse(month.coerceIn(1, 12)) { "آبان" }
 
     fun fromTimestamp(timestampMillis: Long): JalaliDateTime {
         val effectiveMillis = if (timestampMillis > 946684800000L) {
@@ -226,7 +245,6 @@ object JibemanSmsEngine : BankSmsParser {
         val banks: List<DetectedBank>
     ) {
         companion object {
-            /** Mirrors BankDetectionResult.Companion.getUnreadable(). */
             fun unreadable(): BankDetectionResult = BankDetectionResult(0, emptyList())
         }
     }
@@ -276,7 +294,6 @@ object JibemanSmsEngine : BankSmsParser {
         BankProfile("ایران ونزوئلا", "iran venezuela", "ic_bank_iran_venezuela", listOf("20004860")),
     )
 
-    /** Exact-key lookup map: later profiles overwrite earlier duplicate keys. */
     private val numberToProfile: Map<String, BankProfile> by lazy {
         LinkedHashMap<String, BankProfile>().apply {
             for (profile in BANK_PROFILES) {
@@ -285,7 +302,6 @@ object JibemanSmsEngine : BankSmsParser {
         }
     }
 
-    /** Lowercase lookup map: first lowercase collision wins (putIfAbsent). */
     private val lowercaseNumberToProfile: Map<String, BankProfile> by lazy {
         LinkedHashMap<String, BankProfile>().apply {
             for ((number, profile) in numberToProfile) {
@@ -294,13 +310,8 @@ object JibemanSmsEngine : BankSmsParser {
         }
     }
 
-    /**
-     * SenderMatcher.hasUssdMark: USSD/service codes containing '*' or '#'
-     * are excluded from normalized sender matching.
-     */
     fun hasUssdMark(sender: String): Boolean = sender.indexOf('*') >= 0 || sender.indexOf('#') >= 0
 
-    /** Convert Persian and Arabic-Indic digits to ASCII digits. */
     fun toLatinDigits(sender: String): String {
         val out = StringBuilder(sender.length)
         for (ch in sender) {
@@ -314,11 +325,6 @@ object JibemanSmsEngine : BankSmsParser {
         return out.toString()
     }
 
-    /**
-     * SenderMatcher.normalize:
-     * Latinize Persian/Arabic digits, lowercase with Locale.ROOT, trim,
-     * retain only letters/digits, strip 0098, then strip 98 only when len > 8.
-     */
     fun normalizeSender(sender: String): String {
         var value = toLatinDigits(sender).lowercase(Locale.ROOT).trim()
             .filter { it.isLetterOrDigit() }
@@ -330,7 +336,6 @@ object JibemanSmsEngine : BankSmsParser {
         return value
     }
 
-    /** SenderMatcher.matches: exact normalized match or numeric suffix match. */
     fun senderMatches(first: String, second: String): Boolean {
         if (hasUssdMark(first) || hasUssdMark(second)) return false
         val a = normalizeSender(first)
@@ -342,14 +347,9 @@ object JibemanSmsEngine : BankSmsParser {
             (a.endsWith(b) || b.endsWith(a))
     }
 
-    /** Exact match first, then trimmed case-insensitive raw sender lookup. */
     fun findByNumber(sender: String): BankProfile? =
         numberToProfile[sender] ?: lowercaseNumberToProfile[sender.trim().lowercase(Locale.ROOT)]
 
-    /**
-     * DefaultBankProfiles.resolveBySender:
-     * raw exact/case-insensitive lookup first; then normalized index order.
-     */
     fun resolveBank(sender: String): BankProfile? {
         findByNumber(sender)?.let { return it }
         if (hasUssdMark(sender)) return null
@@ -372,9 +372,6 @@ object JibemanSmsEngine : BankSmsParser {
         return null
     }
 
-    /**
-     * Pure equivalent of BankSenderDetector.detect over rows already read from SMS.
-     */
     fun detectBanks(rows: List<SmsSenderRow>): BankDetectionResult {
         if (rows.isEmpty()) return BankDetectionResult.unreadable()
 
@@ -647,14 +644,6 @@ data class ParsedSmsResult(
 
 object BankSmsParserEngine {
 
-    /**
-     * Exact Jibeman bytecode pipeline for real SMS scanning & receiving:
-     * 1. Check `val bankProfile = JibemanSmsEngine.resolveBank(senderAddress)`. If null, reject immediately.
-     * 2. Call `val parsed = JibemanSmsEngine.parse(body) ?: return null`.
-     * 3. Convert Rial to Toman (`parsed.amount / 10L` and `parsed.balance?.div(10L)`).
-     * 4. Set `isDeposit = (parsed.direction == "in")` and `bankName = bankProfile.nameFa`.
-     * 5. Use `JibemanSmsEngine.dedupKey(senderAddress, timestampMillis, body)` as the unique transaction ID.
-     */
     fun parseWithJibemanEngine(
         senderAddress: String,
         body: String,
@@ -712,7 +701,7 @@ object BankSmsParserEngine {
             isSelfTransfer -> "بین کارت‌های خودی ($bankName)"
             isSalaryDeposit -> "واریز حقوق ماهانه ($bankName)"
             isDeposit -> "واریز بانکی ($bankName)"
-            else -> "خرید کارتی ($bankName)"
+            else -> bankName
         }
 
         val detectedPurpose = when {
@@ -720,7 +709,7 @@ object BankSmsParserEngine {
             isSelfTransfer -> "جابه‌جایی داخلی بدون اثر بر تراز"
             isSalaryDeposit -> "شارژ ماه حقوقی جدید"
             isDeposit -> "افزایش موجودی حساب"
-            else -> "تکمیل نشده • با لمس میکروفون بگویید"
+            else -> ""
         }
 
         val detectedTitle = when {
@@ -814,8 +803,8 @@ object BankSmsParserEngine {
             jalaliYear = realJalali.year,
             timeStr = realJalali.timeStr,
             detectedTitle = if (isDeposit) "واریز به $cardLabel" else "برداشت از $cardLabel",
-            detectedStore = if (isDeposit) "واریز بانکی ($bankName)" else "خرید کارتی ($bankName)",
-            detectedPurpose = if (isDeposit) "افزایش موجودی حساب" else "تکمیل نشده • با لمس میکروفون بگویید",
+            detectedStore = if (isDeposit) "واریز بانکی ($bankName)" else bankName,
+            detectedPurpose = if (isDeposit) "افزایش موجودی حساب" else "",
             summaryMessage = "پیامک بانک $bankName به مبلغ ${PersianNumberUtils.formatToman(amountToman, true)} ثبت شد."
         )
     }
@@ -861,102 +850,105 @@ object PersianVoiceSlangParserEngine {
         "دویست تومن" to 200_000L,
         "صد و پنجاه" to 150_000L,
         "صد هزار" to 100_000L,
-        "صد تومن" to 100_000L
+        "صد تومن" to 100_000L,
+        "پنجاه هزار" to 50_000L,
+        "پنجاه تومن" to 50_000L
     )
 
-    fun parseSpokenText(text: String, fallbackTotalToman: Long? = null): ParsedVoiceExpense {
-        val cleaned = PersianNumberUtils.normalizePersianText(text.trim())
+    private val knownBrandsAndStores = listOf(
+        "ایرانسل" to "ایرانسل",
+        "همراه اول" to "همراه اول",
+        "رایتل" to "رایتل",
+        "شاتل" to "شاتل",
+        "آسیاتک" to "آسیاتک",
+        "اسنپ‌مارکت" to "اسنپ‌مارکت",
+        "اسنپ مارکت" to "اسنپ‌مارکت",
+        "اسنپمارکت" to "اسنپ‌مارکت",
+        "اسنپ فود" to "اسنپ‌فود",
+        "اسنپ" to "اسنپ",
+        "تپسی" to "تپسی",
+        "دیجی‌کالا" to "دیجی‌کالا",
+        "دیجی کالا" to "دیجی‌کالا",
+        "دیجیکالا" to "دیجی‌کالا",
+        "افق کوروش" to "افق کوروش",
+        "هایپراستار" to "هایپراستار",
+        "شهروند" to "فروشگاه شهروند",
+        "نانوایی" to "نانوایی",
+        "داروخانه" to "داروخانه",
+        "سوپرمارکت" to "سوپرمارکت",
+        "کافه لمیز" to "کافه لمیز",
+        "رستوران نایب" to "رستوران نایب"
+    )
+
+    private val conversationalFillers = listOf(
+        "پرداخت کردم",
+        "کارت کشیدم",
+        "واریز کردم",
+        "خرید کردم",
+        "خریدم",
+        "گرفتم",
+        "دادم",
+        "زدم",
+        "شد",
+        "بابتِ",
+        "بابت"
+    )
+
+    /**
+     * Exact Voice Command Parser (`parseVoiceCommand`):
+     * - Strips conversational filler words (`خریدم`, `گرفتم`, `دادم`, `پرداخت کردم`, `زدم`, `شد`, `بابت`).
+     * - If the user does NOT explicitly say `"از [فروشگاه] بابت [توضیح]"`, uses the exact spoken phrase
+     *   itself (e.g. `"پفک"`, `"شارژ ایرانسل"`, `"هاست"`, `"نانوایی"`) directly as the transaction's
+     *   title and purpose (`بابت`)!
+     * - NEVER falls back to `"اسنپ‌مارکت"` or `"خرید روزمره"`! Only sets `storeName` if a brand/store is
+     *   actually spoken, otherwise sets `storeName = defaultBankName`.
+     */
+    fun parseVoiceCommand(
+        rawSpeech: String,
+        fallbackTotalToman: Long? = null,
+        defaultBankName: String = "بلو"
+    ): ParsedVoiceExpense {
+        val cleaned = PersianNumberUtils.normalizePersianText(rawSpeech.trim())
         val engText = PersianNumberUtils.toEnglishDigits(cleaned)
 
-        // 1. Parse Total Amount in Toman
+        // 1. Parse Total Amount in Toman (if not already provided by target transaction)
         var totalToman: Long = fallbackTotalToman ?: 0L
-        if (totalToman == 0L) {
+        if (totalToman == 0L && cleaned.isNotBlank()) {
             val matchedWord = wordMultipliers.firstOrNull { cleaned.contains(it.first) }
             if (matchedWord != null) {
                 totalToman = matchedWord.second
             } else {
-                val numRegex = Regex("""([0-9]+)\s*(میلیون|هزار|تومان|تومن)""")
+                val numRegex = Regex("""([0-9]+)\s*(میلیون|هزار|تومان|تومن)?""")
                 val firstMatch = numRegex.find(engText)
                 if (firstMatch != null) {
-                    val value = firstMatch.groupValues[1].toLongOrNull() ?: 500L
+                    val value = firstMatch.groupValues[1].toLongOrNull() ?: 0L
                     val unit = firstMatch.groupValues[2]
                     totalToman = when {
                         unit == "میلیون" -> value * 1_000_000L
                         unit == "هزار" -> value * 1_000L
-                        value < 2000L -> value * 1_000L
+                        value in 1L..1999L -> value * 1_000L
                         else -> value
                     }
-                } else {
-                    totalToman = 500_000L
                 }
             }
         }
 
-        // 2. Parse Store (فروشگاه)
-        val knownStores = listOf(
-            "اسنپ‌مارکت" to "اسنپ‌مارکت",
-            "اسنپ مارکت" to "اسنپ‌مارکت",
-            "اسنپمارکت" to "اسنپ‌مارکت",
-            "دیجی‌کالا" to "دیجی‌کالا",
-            "دیجی کالا" to "دیجی‌کالا",
-            "کافه لمیز" to "کافه لمیز",
-            "کافه نادری" to "کافه نادری",
-            "رستوران نایب" to "رستوران نایب",
-            "هایپراستار" to "هایپراستار",
-            "افق کوروش" to "افق کوروش",
-            "شهروند" to "فروشگاه شهروند",
-            "تپسی" to "تاکسی اینترنتی تپسی",
-            "اسنپ" to "اسنپ"
-        )
-        var storeName = knownStores.firstOrNull { cleaned.contains(it.first) }?.second
-        if (storeName == null) {
-            val fromRegex = Regex("""از\s+([^\s]+(?:\s+[^\s]+)?)""")
-            val match = fromRegex.find(cleaned)?.groupValues?.get(1)
-                ?.replace("با کارت", "")
-                ?.replace("که", "")
-                ?.trim()
-            storeName = if (!match.isNullOrBlank()) match else "اسنپ‌مارکت"
-        }
-
-        // 3. Parse Purpose / Category (بابت)
-        val knownPurposes = listOf(
-            "خرید میوه" to "خرید میوه و تره‌بار",
-            "میوه" to "خرید میوه و تره‌بار",
-            "شام" to "شام و رستوران",
-            "ناهار" to "ناهار و رستوران",
-            "قهوه و کیک" to "کافه و عصرانه",
-            "قهوه" to "کافه و عصرانه",
-            "لباس" to "خرید پوشاک",
-            "دارو" to "داروخانه و سلامت",
-            "بنزین" to "سوخت و خودرو"
-        )
-        var purposeCategory = knownPurposes.firstOrNull { cleaned.contains(it.first) }?.second
-        if (purposeCategory == null) {
-            val purposeRegex = Regex("""(?:خرید|بابت)\s+([^\s]+(?:\s+[^\s]+)?)""")
-            val match = purposeRegex.find(cleaned)?.groupValues?.get(1)
-                ?.replace("از", "")
-                ?.trim()
-            purposeCategory = if (!match.isNullOrBlank()) "خرید $match" else "خرید روزمره"
-        }
-
-        // 4. Parse Card (کارت)
-        val detectedBank = BankSmsParserEngine.detectIranianBankName(cleaned)
-        val cardLabel = if (detectedBank != "بانک") {
-            "کارت $detectedBank"
-        } else {
-            "کارت بانکی"
-        }
-
-        // 5. Parse Dong Split (سهم دنگ)
+        // 2. Parse Dong Split (سهم دنگ) if spoken
         var dongAmount = 0L
         var dongFriend = ""
+        val speechBeforeDong = if (cleaned.contains("که") && (cleaned.contains("دنگ") || cleaned.contains("دُنگ") || cleaned.contains("سهم"))) {
+            cleaned.substringBefore("که").trim()
+        } else {
+            cleaned
+        }
+
         if (cleaned.contains("دنگ") || cleaned.contains("دُنگ") || cleaned.contains("سهم")) {
             val friendRegex = Regex("""(?:دنگ|دُنگ|سهم)\s+([^\s]+)""")
             val rawFriend = friendRegex.find(cleaned)?.groupValues?.get(1)
                 ?.replace("بود", "")
                 ?.replace("شد", "")
                 ?.trim()
-            dongFriend = if (!rawFriend.isNullOrBlank()) rawFriend else "علی"
+            dongFriend = if (!rawFriend.isNullOrBlank()) rawFriend else "دوست"
 
             if (cleaned.contains("نصفش") || cleaned.contains("نصف")) {
                 dongAmount = totalToman / 2L
@@ -964,15 +956,62 @@ object PersianVoiceSlangParserEngine {
                 val dongNumRegex = Regex("""(?:که\s*)?([0-9]+)\s*(?:هزار\s*)?(?:تومنش|تومانش|تومن|هزار)""")
                 val dongMatch = dongNumRegex.find(engText)
                 if (dongMatch != null) {
-                    val rawDongNum = dongMatch.groupValues[1].toLongOrNull() ?: 200L
-                    dongAmount = if (rawDongNum < 2000L) rawDongNum * 1_000L else rawDongNum
+                    val rawDongNum = dongMatch.groupValues[1].toLongOrNull() ?: 0L
+                    dongAmount = if (rawDongNum in 1L..1999L) rawDongNum * 1_000L else rawDongNum
                 } else {
                     val wordDong = wordMultipliers.firstOrNull {
                         cleaned.substringAfter("که", "").contains(it.first)
                     }
-                    dongAmount = wordDong?.second ?: 200_000L
+                    dongAmount = wordDong?.second ?: 0L
                 }
             }
+        }
+
+        // 3. Detect Card / Bank if spoken, else use defaultBankName
+        val spokenBank = BankSmsParserEngine.detectIranianBankName(speechBeforeDong)
+        val effectiveBankName = if (spokenBank != "بانک") spokenBank else defaultBankName.ifBlank { "بانک" }
+        val cardLabel = "کارت $effectiveBankName"
+
+        // 4. Strip amount expressions, card expressions, and conversational fillers to get the exact spoken phrase
+        var corePhrase = speechBeforeDong
+        wordMultipliers.forEach { (wordAmt, _) ->
+            corePhrase = corePhrase.replace(wordAmt, " ")
+        }
+        corePhrase = corePhrase
+            .replace(Regex("""[۰-۹0-9]+\s*(?:میلیون|هزار)?\s*(?:تومان|تومن)"""), " ")
+            .replace(Regex("""با\s+کارت\s+[^\s]+"""), " ")
+            .replace(Regex("""کارت\s+(?:بلو|ملت|ملی|سپه|پاسارگاد|سامان|صادرات|تجارت|رسالت|ویپاد|مسکن|رفاه)"""), " ")
+
+        // Check if user explicitly said "خرید [X] از [Y]" or "از [Y] بابت [X]"
+        val explicitFromPattern = Regex("""(.+?)\s+از\s+(.+)""")
+        val explicitMatch = explicitFromPattern.find(corePhrase.trim())
+
+        val storeName: String
+        val purposeCategory: String
+
+        if (explicitMatch != null) {
+            var leftPart = explicitMatch.groupValues[1].trim()
+            var rightStore = explicitMatch.groupValues[2].trim()
+            conversationalFillers.forEach { filler ->
+                leftPart = leftPart.replace(Regex("""\b$filler\b"""), " ").trim()
+                rightStore = rightStore.replace(Regex("""\b$filler\b"""), " ").trim()
+            }
+            val matchedKnownStore = knownBrandsAndStores.firstOrNull { rightStore.contains(it.first) }?.second
+                ?: rightStore.ifBlank { effectiveBankName }
+            storeName = matchedKnownStore
+            purposeCategory = leftPart.ifBlank { matchedKnownStore }
+        } else {
+            // Strip conversational filler words ("خریدم", "گرفتم", "دادم", "پرداخت کردم", "زدم", "شد", "بابت")
+            var stripped = corePhrase
+            for (filler in conversationalFillers) {
+                stripped = stripped.replace(filler, " ")
+            }
+            stripped = stripped.replace(Regex("""\s+"""), " ").trim()
+
+            // Check if a known brand/store was spoken anywhere in the phrase (e.g. "شارژ ایرانسل")
+            val detectedBrand = knownBrandsAndStores.firstOrNull { cleaned.contains(it.first) }?.second
+            storeName = detectedBrand ?: effectiveBankName
+            purposeCategory = stripped.ifBlank { cleaned }
         }
 
         val safeDongAmount = dongAmount.coerceIn(0L, totalToman)
@@ -989,4 +1028,10 @@ object PersianVoiceSlangParserEngine {
             cardLabel = cardLabel
         )
     }
+
+    fun parseSpokenText(
+        text: String,
+        fallbackTotalToman: Long? = null,
+        defaultBankName: String = "بلو"
+    ): ParsedVoiceExpense = parseVoiceCommand(text, fallbackTotalToman, defaultBankName)
 }

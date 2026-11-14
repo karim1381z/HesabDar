@@ -35,11 +35,12 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountBalanceWallet
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Dashboard
-import androidx.compose.material.icons.filled.EventNote
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -68,24 +69,24 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.ui.CommitmentTab
 import com.example.ui.OrosiScreen
 import com.example.ui.OrosiUiState
 import com.example.ui.OrosiViewModel
+import com.example.ui.components.AddBankAccountBottomSheet
 import com.example.ui.components.AddCommitmentBottomSheet
 import com.example.ui.components.CommitmentActionBottomSheet
-import com.example.ui.components.ConvertSurplusToGoldBottomSheet
-import com.example.ui.components.GoldPartnerAffiliateBottomSheet
 import com.example.ui.components.HeroMathBreakdownBottomSheet
 import com.example.ui.components.PaydayAndBackupBottomSheet
 import com.example.ui.components.SmsSimulatorBottomSheet
 import com.example.ui.components.TransactionDetailAndEditBottomSheet
 import com.example.ui.components.VoiceOverlayBottomSheet
+import com.example.ui.screens.AccountsScreen
 import com.example.ui.screens.CommitmentsScreen
 import com.example.ui.screens.DashboardScreen
-import com.example.ui.screens.InflationShieldScreen
+import com.example.ui.screens.TransactionsScreen
 import com.example.ui.theme.AlabasterSilk
 import com.example.ui.theme.MyApplicationTheme
-import com.example.ui.theme.NishapurTurquoise
 import com.example.ui.theme.NishapurTurquoiseBright
 import com.example.ui.theme.NishapurTurquoiseDeep
 import com.example.ui.theme.NishapurTurquoiseSoft
@@ -325,10 +326,16 @@ fun OrosiFinanceApp(
                 modifier = Modifier.weight(1f)
             ) { screen ->
                 when (screen) {
-                    OrosiScreen.DASHBOARD -> {
+                    OrosiScreen.HOME -> {
                         DashboardScreen(
                             settings = uiState.settings,
+                            bankAccounts = uiState.bankAccounts,
+                            commitments = uiState.commitments,
                             transactions = uiState.transactions,
+                            onToggleHideAmounts = { viewModel.toggleHideAmounts() },
+                            onSetOnlyTankhahMode = { viewModel.setOnlyTankhahMode(it) },
+                            onToggleAccountTankhah = { viewModel.toggleAccountTankhah(it) },
+                            onOpenAccountsTab = { viewModel.navigateTo(OrosiScreen.ACCOUNTS) },
                             onHeroCardClick = { viewModel.setShowHeroMathSheet(true) },
                             onAddVoiceClick = {
                                 voicePermissionLauncher.launch(
@@ -342,21 +349,40 @@ fun OrosiFinanceApp(
                         )
                     }
 
-                    OrosiScreen.COMMITMENTS -> {
-                        CommitmentsScreen(
-                            commitments = uiState.commitments,
-                            onCommitmentClick = { viewModel.openCommitmentActionSheet(it) },
-                            onOpenAddCommitmentModal = { viewModel.setShowAddCommitmentModal(true) },
-                            onBackToDashboard = { viewModel.navigateTo(OrosiScreen.DASHBOARD) }
+                    OrosiScreen.TRANSACTIONS -> {
+                        TransactionsScreen(
+                            transactions = uiState.transactions,
+                            selectedYearMonthKey = uiState.selectedYearMonthKey,
+                            hideAmounts = uiState.settings.hideAmounts,
+                            onChangeMonth = { delta -> viewModel.changeSelectedMonth(delta) },
+                            onTransactionClick = { tx -> viewModel.openTransactionDetails(tx) },
+                            onUntaggedMicClick = { tx ->
+                                viewModel.openVoiceForUntaggedTransaction(tx)
+                            },
+                            onBackToHome = { viewModel.navigateTo(OrosiScreen.HOME) }
                         )
                     }
 
-                    OrosiScreen.INFLATION_SHIELD -> {
-                        InflationShieldScreen(
-                            settings = uiState.settings,
-                            onOpenConvertGoldModal = { viewModel.setShowConvertGoldModal(true) },
-                            onOpenGoldPartnerModal = { viewModel.setShowGoldPartnerModal(true) },
-                            onBackToDashboard = { viewModel.navigateTo(OrosiScreen.DASHBOARD) }
+                    OrosiScreen.ACCOUNTS -> {
+                        AccountsScreen(
+                            bankAccounts = uiState.bankAccounts,
+                            hideAmounts = uiState.settings.hideAmounts,
+                            onToggleTankhah = { bankName -> viewModel.toggleAccountTankhah(bankName) },
+                            onOpenAddAccountModal = { viewModel.setShowAddBankAccountModal(true) },
+                            onBackToHome = { viewModel.navigateTo(OrosiScreen.HOME) }
+                        )
+                    }
+
+                    OrosiScreen.TOOLS -> {
+                        CommitmentsScreen(
+                            selectedTab = uiState.selectedCommitmentTab,
+                            onSelectTab = { viewModel.selectCommitmentTab(it) },
+                            commitments = uiState.commitments,
+                            transactions = uiState.transactions,
+                            hideAmounts = uiState.settings.hideAmounts,
+                            onCommitmentClick = { viewModel.openCommitmentActionSheet(it) },
+                            onOpenAddCommitmentModal = { viewModel.setShowAddCommitmentModal(true) },
+                            onBackToDashboard = { viewModel.navigateTo(OrosiScreen.HOME) }
                         )
                     }
                 }
@@ -364,16 +390,18 @@ fun OrosiFinanceApp(
         }
     }
 
-    // Full Transaction Details & Edit Bottom Sheet
+    // Jibeman-Style Transaction Details & Edit Bottom Sheet
     val detailTx = uiState.selectedTransactionForDetail
     if (detailTx != null) {
         TransactionDetailAndEditBottomSheet(
             transaction = detailTx,
             onQuickVoiceRetag = { tx -> viewModel.openVoiceForUntaggedTransaction(tx) },
-            onSaveEdits = { amount, date, time, card, purpose, store, mode ->
+            onDeleteTransaction = { tx -> viewModel.deleteTransaction(tx) },
+            onSaveEdits = { amount, balanceAfter, date, time, card, purpose, store, mode ->
                 viewModel.saveTransactionEdits(
                     originalTx = detailTx,
                     amountToman = amount,
+                    balanceAfterToman = balanceAfter,
                     weekdayDate = date,
                     timeStr = time,
                     cardInfo = card,
@@ -456,7 +484,14 @@ fun OrosiFinanceApp(
     }
 
     if (uiState.showAddCommitmentModal) {
+        val defaultCategory = when (uiState.selectedCommitmentTab) {
+            CommitmentTab.SAYYAD -> "SAYYAD_ISSUED"
+            CommitmentTab.INSTALLMENTS -> "LOAN_INSTALLMENT"
+            CommitmentTab.DONG -> "DONG"
+            CommitmentTab.REPORTS -> "SAYYAD_ISSUED"
+        }
         AddCommitmentBottomSheet(
+            defaultCategory = defaultCategory,
             onAddCommitment = { category, title, counterparty, amount, dueDate, sayyadId ->
                 viewModel.addNewCommitment(category, title, counterparty, amount, dueDate, sayyadId)
             },
@@ -464,19 +499,12 @@ fun OrosiFinanceApp(
         )
     }
 
-    if (uiState.showConvertGoldModal) {
-        ConvertSurplusToGoldBottomSheet(
-            settings = uiState.settings,
-            onConvert = { viewModel.convertSurplusToGold(it) },
-            onDismiss = { viewModel.setShowConvertGoldModal(false) }
-        )
-    }
-
-    if (uiState.showGoldPartnerModal) {
-        GoldPartnerAffiliateBottomSheet(
-            settings = uiState.settings,
-            onDirectPurchaseGold = { viewModel.convertSurplusToGold(it) },
-            onDismiss = { viewModel.setShowGoldPartnerModal(false) }
+    if (uiState.showAddBankAccountModal) {
+        AddBankAccountBottomSheet(
+            onAddAccount = { bankName, balanceToman, isTankhah, cardLast4 ->
+                viewModel.addOrUpdateBankAccount(bankName, balanceToman, isTankhah, cardLast4)
+            },
+            onDismiss = { viewModel.setShowAddBankAccountModal(false) }
         )
     }
 }
@@ -544,13 +572,13 @@ private fun OrosiTopHeader(
             ) {
                 Icon(
                     imageVector = Icons.Default.CheckCircle,
-                    contentDescription = "اتصال خودکار به پیامک همه بانکها: فعال ✓",
+                    contentDescription = "اتصال خودکار به پیامک همه بانک‌ها: فعال ✓",
                     tint = NishapurTurquoiseBright,
                     modifier = Modifier.size(16.dp)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "اتصال خودکار بانکها ✓",
+                    text = "اتصال خودکار بانک‌ها ✓",
                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                     color = NishapurTurquoiseSoft,
                     maxLines = 1,
@@ -576,9 +604,10 @@ private fun OrosiBottomNavigationBar(
             .testTag("bottom_navigation_bar")
     ) {
         val navItems = listOf(
-            Triple(OrosiScreen.DASHBOARD, "امروز من", Icons.Default.Dashboard),
-            Triple(OrosiScreen.COMMITMENTS, "قسط و چک", Icons.Default.EventNote),
-            Triple(OrosiScreen.INFLATION_SHIELD, "قلک طلا", Icons.Default.Shield)
+            Triple(OrosiScreen.HOME, "خانه", Icons.Default.Home),
+            Triple(OrosiScreen.TRANSACTIONS, "تراکنش‌ها", Icons.Default.ReceiptLong),
+            Triple(OrosiScreen.ACCOUNTS, "حساب‌ها", Icons.Default.AccountBalanceWallet),
+            Triple(OrosiScreen.TOOLS, "ابزارها", Icons.Default.Build)
         )
 
         navItems.forEach { (screen, label, icon) ->

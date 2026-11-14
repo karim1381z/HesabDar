@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.Telephony
 import com.example.data.local.AppSettingsEntity
+import com.example.data.local.BankAccountEntity
 import com.example.data.local.CommitmentEntity
 import com.example.data.local.OrosiDao
 import com.example.data.local.TransactionEntity
@@ -27,7 +28,7 @@ class OrosiFinanceRepository(
 ) {
 
     companion object {
-        const val PREFS_NAME = "orosi_offline_db_v3_jibeman"
+        const val PREFS_NAME = "orosi_offline_db_v4_jibeman"
         private val smsSyncMutex = Mutex()
 
         private val demoStoreNames = setOf(
@@ -53,6 +54,7 @@ class OrosiFinanceRepository(
     }
 
     val transactionsFlow: Flow<List<TransactionEntity>> = dao.observeTransactions()
+    val bankAccountsFlow: Flow<List<BankAccountEntity>> = dao.observeBankAccounts()
     val commitmentsFlow: Flow<List<CommitmentEntity>> = dao.observeCommitments()
     val settingsFlow: Flow<AppSettingsEntity?> = dao.observeSettings()
 
@@ -70,7 +72,6 @@ class OrosiFinanceRepository(
 
     private fun isDemoTransaction(tx: TransactionEntity): Boolean {
         if (tx.storeName in demoStoreNames || tx.title in demoTitles) return true
-        // Also purge any old false-positive non-bank items where shortBankName was generic "بانک"
         if (tx.cardInfo == "کارت بانک" && (tx.storeName.contains("دیجی") || tx.storeName.contains("تپسی") || tx.storeName.contains("اسنپ"))) {
             return true
         }
@@ -98,7 +99,7 @@ class OrosiFinanceRepository(
         val currentSettings = dao.getSettingsNow()
         val existingTx = dao.getAllTransactionsNow()
 
-        // 1. If Room DB is empty on startup, check v3_jibeman SharedPreferences snapshot first
+        // 1. If Room DB is empty on startup, check SharedPreferences snapshot first
         if (currentSettings == null && existingTx.isEmpty() && appContext != null) {
             val savedJson = getPrimaryPrefs()?.getString("backup_snapshot_json", null)
             if (!savedJson.isNullOrBlank()) {
@@ -125,7 +126,9 @@ class OrosiFinanceRepository(
                     goldPrice18kToman = 4_360_000L,
                     goldReserveToman = 48_500_000L,
                     goldGrams = 11.12,
-                    dailyAutoSaveEnabled = true
+                    dailyAutoSaveEnabled = true,
+                    hideAmounts = false,
+                    onlyTankhahMode = false
                 )
             )
         }
@@ -138,81 +141,105 @@ class OrosiFinanceRepository(
                 listOf(
                     TransactionEntity(
                         title = "برداشت کارتی نامشخص (پیامک بلو)",
-                        storeName = "نامشخص",
+                        storeName = "بلو",
                         purpose = "نیازمند تکمیل صوتی",
-                        totalAmountToman = 350_000L,
-                        userShareToman = 350_000L,
+                        totalAmountToman = 100_000L,
+                        userShareToman = 100_000L,
                         weekdayDate = nowJalali.weekdayDate,
                         timeStr = nowJalali.timeStr,
-                        cardInfo = "کارت بلو ۶۲۱۹",
+                        cardInfo = "کارت بلو",
                         type = "EXPENSE",
                         isUntagged = true,
-                        timestamp = now - 1_000L * 60 * 30
+                        timestamp = now - 1_000L * 60 * 30,
+                        balanceAfterToman = 14_250_000L,
+                        rawSmsBody = "بانک سامان - بلوبانک\nبرداشت شتابی ۱,۰۰۰,۰۰۰ ریال\nمانده: ۱۴۲,۵۰۰,۰۰۰ ریال",
+                        bankName = "بلو"
                     ),
                     TransactionEntity(
-                        title = "اسنپ‌مارکت (خرید میوه و پروتئین)",
-                        storeName = "اسنپ‌مارکت",
-                        purpose = "خرید میوه و پروتئین",
-                        totalAmountToman = 420_000L,
-                        userShareToman = 420_000L,
+                        title = "برداشت کارتی نامشخص (پیامک سپه)",
+                        storeName = "سپه",
+                        purpose = "نیازمند تکمیل صوتی",
+                        totalAmountToman = 49_500L,
+                        userShareToman = 49_500L,
                         weekdayDate = nowJalali.weekdayDate,
                         timeStr = "۱۴:۲۵",
-                        cardInfo = "کارت بلو ۶۲۱۹",
-                        type = "EXPENSE",
-                        isUntagged = false,
-                        timestamp = now - 1_000L * 60 * 180
-                    ),
-                    TransactionEntity(
-                        title = "برداشت پایانه فروشگاهی (پیامک ملت)",
-                        storeName = "نامشخص",
-                        purpose = "نیازمند تکمیل صوتی",
-                        totalAmountToman = 195_000L,
-                        userShareToman = 195_000L,
-                        weekdayDate = nowJalali.weekdayDate,
-                        timeStr = "۱۱:۴۰",
-                        cardInfo = "کارت ملت ۸۴۱۲",
+                        cardInfo = "کارت سپه",
                         type = "EXPENSE",
                         isUntagged = true,
-                        timestamp = now - 1_000L * 60 * 600
+                        timestamp = now - 1_000L * 60 * 180,
+                        balanceAfterToman = 984_433L,
+                        rawSmsBody = "بانک سپه\nبرداشت: ۴۹۵,۰۰۰ ریال\nمانده: ۹,۸۴۴,۳۳۰ ریال",
+                        bankName = "سپه"
                     ),
                     TransactionEntity(
-                        title = "تبدیل خودکار مازاد به طلای ۱۸ عیار",
-                        storeName = "سپر تورمی اُرسی",
-                        purpose = "پس‌انداز ضدتورمی روزانه",
-                        totalAmountToman = 1_200_000L,
-                        userShareToman = 1_200_000L,
-                        weekdayDate = nowJalali.weekdayDate,
-                        timeStr = "۱۰:۱۵",
-                        cardInfo = "کارت سامان ۷۳۹۰",
-                        type = "GOLD_SAVE",
-                        isUntagged = false,
-                        timestamp = now - 1_000L * 60 * 720
-                    ),
-                    TransactionEntity(
-                        title = "انتقال بین بانکی خودی (بلو به ملت)",
-                        storeName = "کارت‌های خودی",
-                        purpose = "جابه‌جایی داخلی بدون اثر بر تراز",
-                        totalAmountToman = 5_000_000L,
-                        userShareToman = 0L,
-                        weekdayDate = nowJalali.weekdayDate,
-                        timeStr = "۰۹:۰۵",
-                        cardInfo = "کارت بلو ۶۲۱۹",
-                        type = "SELF_TRANSFER",
-                        isUntagged = false,
-                        timestamp = now - 1_000L * 60 * 1440
-                    ),
-                    TransactionEntity(
-                        title = "واریز حقوق آبان‌ماه (آغاز ماه حقوقی)",
+                        title = "واریز حقوق ماهانه",
                         storeName = "شرکت فناوری اُرسی",
                         purpose = "واریز حقوق ماهانه",
                         totalAmountToman = 42_000_000L,
                         userShareToman = 42_000_000L,
                         weekdayDate = nowJalali.weekdayDate,
                         timeStr = "۰۸:۳۰",
-                        cardInfo = "کارت ملت ۸۴۱۲",
+                        cardInfo = "کارت بلو",
                         type = "INCOME",
                         isUntagged = false,
-                        timestamp = now - 1_000L * 60 * 2880
+                        timestamp = now - 1_000L * 60 * 2880,
+                        balanceAfterToman = 42_350_000L,
+                        rawSmsBody = "واریز به حساب بلو مبلغ ۴۲۰,۰۰۰,۰۰۰ ریال\nمانده: ۴۲۳,۵۰۰,۰۰۰ ریال",
+                        bankName = "بلو"
+                    )
+                )
+            )
+        }
+
+        val existingAccounts = dao.getAllBankAccountsNow()
+        if (existingAccounts.isEmpty() && !hasRealSmsOnDevice) {
+            val now = System.currentTimeMillis()
+            dao.upsertBankAccounts(
+                listOf(
+                    BankAccountEntity(
+                        bankName = "بلو",
+                        nameEn = "Blu Bank",
+                        balanceToman = 14_250_000L,
+                        isTankhah = true,
+                        cardLast4 = "۶۲۱۹",
+                        lastUpdatedTimestamp = now - 1000L,
+                        isManual = false
+                    ),
+                    BankAccountEntity(
+                        bankName = "سپه",
+                        nameEn = "Bank Sepah",
+                        balanceToman = 984_433L,
+                        isTankhah = true,
+                        cardLast4 = "۵۸۹۲",
+                        lastUpdatedTimestamp = now - 2000L,
+                        isManual = false
+                    ),
+                    BankAccountEntity(
+                        bankName = "پاسارگاد",
+                        nameEn = "Bank Pasargad",
+                        balanceToman = 1_000L,
+                        isTankhah = false,
+                        cardLast4 = "۵۰۲۲",
+                        lastUpdatedTimestamp = now - 3000L,
+                        isManual = false
+                    ),
+                    BankAccountEntity(
+                        bankName = "ملت",
+                        nameEn = "Bank Mellat",
+                        balanceToman = 0L,
+                        isTankhah = false,
+                        cardLast4 = "۶۱۰۴",
+                        lastUpdatedTimestamp = now - 4000L,
+                        isManual = false
+                    ),
+                    BankAccountEntity(
+                        bankName = "ویپاد",
+                        nameEn = "Wepod",
+                        balanceToman = 0L,
+                        isTankhah = false,
+                        cardLast4 = "۵۰۲۲",
+                        lastUpdatedTimestamp = now - 5000L,
+                        isManual = false
                     )
                 )
             )
@@ -233,17 +260,6 @@ class OrosiFinanceRepository(
                         statusText = "ثبت شده در سامانه صیاد • کسر شده از تراز ماه",
                         isSettled = false,
                         timestamp = now - 1000L
-                    ),
-                    CommitmentEntity(
-                        category = "SAYYAD_RECEIVED",
-                        title = "چک دریافتی صیادی • پروژه طراحی سیستم",
-                        counterparty = "صادرکننده: شرکت پارس‌نگار • بانک سامان",
-                        amountToman = 8_500_000L,
-                        dueDateStr = "سررسید: ۲۲ آبان ۱۴۰۳",
-                        sayyadId = "۴۰۳۹۵۵۱۸۲۷۳۶۴۹۱۰",
-                        statusText = "وضعیت سفید صیاد • آماده واریز به حساب",
-                        isSettled = false,
-                        timestamp = now - 2000L
                     ),
                     CommitmentEntity(
                         category = "LOAN_INSTALLMENT",
@@ -281,11 +297,9 @@ class OrosiFinanceRepository(
         val allTxs = dao.getAllTransactionsNow()
 
         if (hasRealSms) {
-            // Remove all demo transactions
             allTxs.filter { isDemoTransaction(it) }.forEach { demoTx ->
                 dao.deleteTransactionById(demoTx.id)
             }
-            // Remove all hardcoded fake demo commitments ("محمدرضا کاظمی", etc.)
             val allCommitments = dao.getAllCommitmentsNow()
             allCommitments.filter { isDemoCommitment(it) }.forEach { demoC ->
                 dao.deleteCommitmentById(demoC.id)
@@ -293,29 +307,41 @@ class OrosiFinanceRepository(
         }
     }
 
-    private fun saveExtractedCardBalance(bankKey: String, balanceToman: Long, smsTimestamp: Long) {
-        val prefs = getPrimaryPrefs() ?: return
-        try {
-            val rawJson = prefs.getString("card_balances_v3_json", "{}") ?: "{}"
-            val obj = JSONObject(rawJson)
-            val existingObj = obj.optJSONObject(bankKey)
-            val prevTimestamp = existingObj?.optLong("ts", 0L) ?: 0L
-            if (smsTimestamp >= prevTimestamp) {
-                val entry = JSONObject().apply {
-                    put("balanceToman", balanceToman)
-                    put("ts", smsTimestamp)
-                }
-                obj.put(bankKey, entry)
-                prefs.edit().putString("card_balances_v3_json", obj.toString()).apply()
-            }
-        } catch (_: Exception) {
+    private suspend fun upsertDiscoveredBankAccount(
+        bankNameFa: String,
+        bankNameEn: String,
+        balanceToman: Long?,
+        smsTimestamp: Long
+    ) {
+        val existing = dao.getBankAccountByName(bankNameFa)
+        if (existing == null) {
+            dao.upsertBankAccount(
+                BankAccountEntity(
+                    bankName = bankNameFa,
+                    nameEn = bankNameEn,
+                    balanceToman = balanceToman ?: 0L,
+                    isTankhah = true,
+                    cardLast4 = "",
+                    lastUpdatedTimestamp = smsTimestamp,
+                    isManual = false
+                )
+            )
+        } else if (!existing.isManual) {
+            val shouldUpdateBalance = balanceToman != null && smsTimestamp >= existing.lastUpdatedTimestamp
+            dao.upsertBankAccount(
+                existing.copy(
+                    nameEn = bankNameEn.ifBlank { existing.nameEn },
+                    balanceToman = if (shouldUpdateBalance) balanceToman!! else existing.balanceToman,
+                    lastUpdatedTimestamp = maxOf(existing.lastUpdatedTimestamp, smsTimestamp)
+                )
+            )
         }
     }
 
     fun getTotalExtractedCardBalanceToman(): Long {
         val prefs = getPrimaryPrefs() ?: return 0L
         return try {
-            val rawJson = prefs.getString("card_balances_v3_json", "{}") ?: "{}"
+            val rawJson = prefs.getString("card_balances_v4_json", "{}") ?: "{}"
             val obj = JSONObject(rawJson)
             var sum = 0L
             val keys = obj.keys()
@@ -332,20 +358,45 @@ class OrosiFinanceRepository(
         }
     }
 
+    private fun saveExtractedCardBalance(bankKey: String, balanceToman: Long, smsTimestamp: Long) {
+        val prefs = getPrimaryPrefs() ?: return
+        try {
+            val rawJson = prefs.getString("card_balances_v4_json", "{}") ?: "{}"
+            val obj = JSONObject(rawJson)
+            val existingObj = obj.optJSONObject(bankKey)
+            val prevTimestamp = existingObj?.optLong("ts", 0L) ?: 0L
+            if (smsTimestamp >= prevTimestamp) {
+                val entry = JSONObject().apply {
+                    put("balanceToman", balanceToman)
+                    put("ts", smsTimestamp)
+                }
+                obj.put(bankKey, entry)
+                prefs.edit().putString("card_balances_v4_json", obj.toString()).apply()
+            }
+        } catch (_: Exception) {
+        }
+    }
+
     /**
-     * Dynamically recalculates `monthlyBalanceToman` and `dailySafeBudgetToman` ("سهم خرج امروزت")
-     * from the user's actual latest extracted bank card balances (`مانده`) or deposits minus expenses,
-     * minus unpaid commitments, divided by remaining days in the payday cycle,
-     * and rounds `dailySafeToSpend` down to clean thousands (`(raw / 1000L) * 1000L`).
+     * Dynamically recalculates `monthlyBalanceToman` and `dailySafeBudgetToman`
+     * from the user's actual bank accounts in Room (either all accounts or only Tankhah accounts),
+     * minus unpaid commitments of this month.
      */
     suspend fun recalculateRealSafeToSpend() {
         val currentSettings = dao.getSettingsNow() ?: AppSettingsEntity()
+        val allAccounts = dao.getAllBankAccountsNow()
         val allTxs = dao.getAllTransactionsNow()
         val allCommitments = dao.getAllCommitmentsNow()
 
-        val extractedBalanceSum = getTotalExtractedCardBalanceToman()
-        val hasRealSms = getPrimaryPrefs()?.getBoolean("has_real_bank_sms", false) == true
+        val activeAccounts = if (currentSettings.onlyTankhahMode) {
+            allAccounts.filter { it.isTankhah }
+        } else {
+            allAccounts
+        }
+        val accountsBalanceSum = activeAccounts.sumOf { it.balanceToman.coerceAtLeast(0L) }
+        val totalAllAccountsSum = allAccounts.sumOf { it.balanceToman.coerceAtLeast(0L) }
 
+        val hasRealSms = getPrimaryPrefs()?.getBoolean("has_real_bank_sms", false) == true
         val nonDemoTxs = allTxs.filter { !isDemoTransaction(it) }
         val activeTxs = if (hasRealSms || nonDemoTxs.isNotEmpty()) nonDemoTxs else allTxs
 
@@ -357,37 +408,29 @@ class OrosiFinanceRepository(
             .sumOf { it.amountToman }
 
         val rawAccountBalanceToman: Long = when {
-            extractedBalanceSum > 0L -> extractedBalanceSum
+            allAccounts.isNotEmpty() -> accountsBalanceSum
             totalDeposits > totalExpenses -> totalDeposits - totalExpenses
             currentSettings.monthlyBalanceToman > 0L -> currentSettings.monthlyBalanceToman
-            else -> 18_450_000L
+            else -> 0L
         }
 
-        val freeMonthlyBalance = if (rawAccountBalanceToman > unpaidCommitments) {
-            rawAccountBalanceToman - unpaidCommitments
-        } else {
-            rawAccountBalanceToman
-        }
+        val freeMonthlyBalance = (rawAccountBalanceToman - unpaidCommitments).coerceAtLeast(0L)
 
         val remainingDays = JalaliCalendarUtils
             .calculateRemainingDaysToPayday(currentSettings.paydayStartDay)
             .coerceIn(1, 30)
 
         val rawDailySafe = if (freeMonthlyBalance > 0L) {
-            (freeMonthlyBalance / remainingDays.toLong()).coerceAtLeast(
-                (rawAccountBalanceToman / 30L).coerceAtLeast(25_000L)
-            )
+            (freeMonthlyBalance / remainingDays.toLong()).coerceAtLeast(1_000L)
         } else {
-            680_000L
+            0L
         }
 
-        // Round down to clean thousands: (raw / 1000L) * 1000L
         val roundedDailySafe = PersianNumberUtils.roundDownToCleanThousands(rawDailySafe)
-            .coerceAtLeast(if (rawDailySafe > 0L) 1_000L else 0L)
 
         dao.saveSettings(
             currentSettings.copy(
-                monthlyBalanceToman = freeMonthlyBalance.coerceAtLeast(rawAccountBalanceToman),
+                monthlyBalanceToman = totalAllAccountsSum.coerceAtLeast(rawAccountBalanceToman),
                 dailySafeBudgetToman = roundedDailySafe
             )
         )
@@ -407,14 +450,19 @@ class OrosiFinanceRepository(
         senderAddress: String = ""
     ): ParsedSmsResult? = smsSyncMutex.withLock {
         val bankProfile = JibemanSmsEngine.resolveBank(senderAddress) ?: return null
-        val parsed = JibemanSmsEngine.parse(rawSms) ?: return null
+        val bankName = bankProfile.nameFa
+
+        val parsed = JibemanSmsEngine.parse(rawSms)
+        if (parsed == null) {
+            upsertDiscoveredBankAccount(bankName, bankProfile.nameEn, null, timestampMillis)
+            return null
+        }
 
         val amountToman = parsed.amount / 10L
         if (amountToman <= 0L) return null
 
         val balanceToman = parsed.balance?.div(10L)
         val isDeposit = (parsed.direction == "in")
-        val bankName = bankProfile.nameFa
         val uniqueDedupKey = JibemanSmsEngine.dedupKey(senderAddress, timestampMillis, rawSms)
 
         val fullResult = BankSmsParserEngine.parseWithJibemanEngine(
@@ -424,20 +472,24 @@ class OrosiFinanceRepository(
         ) ?: return null
 
         val prefs = getPrimaryPrefs()
+        val hadRealSmsBefore = prefs?.getBoolean("has_real_bank_sms", false) == true
         val importedKeys = prefs?.getStringSet("jibeman_dedup_keys", emptySet())?.toMutableSet()
             ?: mutableSetOf()
 
-        if (importedKeys.contains(uniqueDedupKey)) {
-            return fullResult
+        if (!hadRealSmsBefore) {
+            prefs?.edit()?.putBoolean("has_real_bank_sms", true)?.apply()
+            dao.clearAllBankAccounts()
+            cleanupDemoAndDuplicatesIfRealSmsPresent()
         }
 
-        // Mark real SMS mode & purge demo transactions and fake demo commitments
-        prefs?.edit()?.putBoolean("has_real_bank_sms", true)?.apply()
-        cleanupDemoAndDuplicatesIfRealSmsPresent()
-
-        // Save latest extracted balance for this bank
+        upsertDiscoveredBankAccount(bankName, bankProfile.nameEn, balanceToman, timestampMillis)
         if (balanceToman != null && balanceToman >= 0L) {
             saveExtractedCardBalance(bankName, balanceToman, timestampMillis)
+        }
+
+        if (importedKeys.contains(uniqueDedupKey)) {
+            recalculateRealSafeToSpend()
+            return fullResult
         }
 
         if (!fullResult.isMicroFee) {
@@ -460,7 +512,10 @@ class OrosiFinanceRepository(
                     cardInfo = fullResult.cardLabel,
                     type = txType,
                     isUntagged = fullResult.isUntaggedPurchase,
-                    timestamp = timestampMillis
+                    timestamp = timestampMillis,
+                    balanceAfterToman = balanceToman,
+                    rawSmsBody = rawSms,
+                    bankName = bankName
                 )
             )
         }
@@ -483,25 +538,32 @@ class OrosiFinanceRepository(
     }
 
     /**
-     * Scans `Telephony.Sms.Inbox` using `JibemanSmsEngine`:
-     * 1. Check `val bankProfile = JibemanSmsEngine.resolveBank(senderAddress)`. If null, reject immediately.
-     * 2. Call `val parsed = JibemanSmsEngine.parse(body) ?: continue`.
-     * 3. Convert Rial to Toman (`parsed.amount / 10L` and `parsed.balance?.div(10L)`).
-     * 4. Set `isDeposit = (parsed.direction == "in")` and `bankName = bankProfile.nameFa`.
-     * 5. Use `JibemanSmsEngine.dedupKey(senderAddress, timestampMillis, body)` as the unique transaction ID.
+     * Scans the FULL SMS Inbox (no 30-day limit, up to 3000 messages ordered by DATE DESC)
+     * using `JibemanSmsEngine` so ALL of the user's banks (Blu, Sepah, Pasargad, Mellat, Wepod, etc.)
+     * are detected and their latest `مانده` (balance) is extracted.
      */
     suspend fun scanDeviceSmsInboxLast30Days(
         context: Context,
-        daysBack: Int = 60
+        daysBack: Int = 3650
     ): Int = withContext(Dispatchers.IO) {
         smsSyncMutex.withLock {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val hadRealSmsBefore = prefs.getBoolean("has_real_bank_sms", false)
             val importedKeys = prefs.getStringSet("jibeman_dedup_keys", emptySet())?.toMutableSet()
                 ?: mutableSetOf()
 
             var importedCount = 0
             var foundAnyRealBankSms = false
-            val cutoffMillis = System.currentTimeMillis() - (daysBack.toLong() * 24L * 60L * 60L * 1000L)
+
+            data class DiscoveredBankState(
+                val nameFa: String,
+                val nameEn: String,
+                var latestBalanceToman: Long? = null,
+                var latestBalanceTimestamp: Long = 0L,
+                var latestSeenTimestamp: Long = 0L
+            )
+
+            val discoveredBanks = linkedMapOf<String, DiscoveredBankState>()
 
             try {
                 val projection = arrayOf(
@@ -510,21 +572,20 @@ class OrosiFinanceRepository(
                     Telephony.Sms.BODY,
                     Telephony.Sms.DATE
                 )
-                val selection = "${Telephony.Sms.DATE} >= ?"
-                val selectionArgs = arrayOf(cutoffMillis.toString())
-                val sortOrder = "${Telephony.Sms.DATE} DESC LIMIT 500"
+                // Remove 30-day cutoff: scan up to 3000 inbox messages ordered newest first
+                val sortOrder = "${Telephony.Sms.DATE} DESC LIMIT 3000"
 
                 val cursor = context.contentResolver.query(
                     Telephony.Sms.Inbox.CONTENT_URI,
                     projection,
-                    selection,
-                    selectionArgs,
+                    null,
+                    null,
                     sortOrder
                 ) ?: context.contentResolver.query(
                     Uri.parse("content://sms/inbox"),
                     projection,
-                    selection,
-                    selectionArgs,
+                    null,
+                    null,
                     sortOrder
                 )
 
@@ -543,6 +604,19 @@ class OrosiFinanceRepository(
                         // Step 1: Resolve bank strictly from senderAddress via JibemanSmsEngine
                         // Rejects Digikala, Tapsi, Snapp, and all promo SMS 100%
                         val bankProfile = JibemanSmsEngine.resolveBank(senderAddress) ?: continue
+                        val bankName = bankProfile.nameFa
+                        foundAnyRealBankSms = true
+
+                        val bankState = discoveredBanks.getOrPut(bankName) {
+                            DiscoveredBankState(
+                                nameFa = bankName,
+                                nameEn = bankProfile.nameEn,
+                                latestSeenTimestamp = timestampMillis
+                            )
+                        }
+                        if (timestampMillis > bankState.latestSeenTimestamp) {
+                            bankState.latestSeenTimestamp = timestampMillis
+                        }
 
                         // Step 2: Parse SMS body via JibemanSmsEngine
                         val parsed = JibemanSmsEngine.parse(body) ?: continue
@@ -552,19 +626,20 @@ class OrosiFinanceRepository(
                         if (amountToman <= 0L) continue
                         val balanceToman = parsed.balance?.div(10L)
 
+                        // Record latest balance for this bank (cursor is DATE DESC, or check timestamp)
+                        if (balanceToman != null && balanceToman >= 0L) {
+                            if (bankState.latestBalanceToman == null || timestampMillis >= bankState.latestBalanceTimestamp) {
+                                bankState.latestBalanceToman = balanceToman
+                                bankState.latestBalanceTimestamp = timestampMillis
+                            }
+                            saveExtractedCardBalance(bankName, balanceToman, timestampMillis)
+                        }
+
                         // Step 4: Direction & Bank Name
                         val isDeposit = (parsed.direction == "in")
-                        val bankName = bankProfile.nameFa
 
                         // Step 5: Exact Jibeman SHA-256 deduplication key
                         val uniqueDedupKey = JibemanSmsEngine.dedupKey(senderAddress, timestampMillis, body)
-
-                        foundAnyRealBankSms = true
-
-                        // Always record latest extracted balance (`مانده`) per bank
-                        if (balanceToman != null && balanceToman >= 0L) {
-                            saveExtractedCardBalance(bankName, balanceToman, timestampMillis)
-                        }
 
                         if (importedKeys.contains(uniqueDedupKey)) {
                             continue
@@ -600,7 +675,10 @@ class OrosiFinanceRepository(
                                 cardInfo = fullResult.cardLabel,
                                 type = txType,
                                 isUntagged = fullResult.isUntaggedPurchase,
-                                timestamp = timestampMillis
+                                timestamp = timestampMillis,
+                                balanceAfterToman = balanceToman,
+                                rawSmsBody = body,
+                                bankName = bankName
                             )
                         )
 
@@ -613,10 +691,30 @@ class OrosiFinanceRepository(
             } catch (_: Exception) {
             }
 
-            // When real bank SMS exist on the phone, wipe all demo transactions and fake demo commitments
+            // When real bank SMS exist on the phone, wipe demo transactions, demo commitments, and demo accounts
             if (foundAnyRealBankSms) {
                 prefs.edit().putBoolean("has_real_bank_sms", true).apply()
+                if (!hadRealSmsBefore) {
+                    dao.clearAllBankAccounts()
+                }
                 cleanupDemoAndDuplicatesIfRealSmsPresent()
+
+                val existingAccountsByName = dao.getAllBankAccountsNow().associateBy { it.bankName }
+                val updatedAccounts = discoveredBanks.values.map { st ->
+                    val prev = existingAccountsByName[st.nameFa]
+                    BankAccountEntity(
+                        bankName = st.nameFa,
+                        nameEn = st.nameEn,
+                        balanceToman = st.latestBalanceToman ?: prev?.balanceToman ?: 0L,
+                        isTankhah = prev?.isTankhah ?: true,
+                        cardLast4 = prev?.cardLast4 ?: "",
+                        lastUpdatedTimestamp = maxOf(st.latestBalanceTimestamp, st.latestSeenTimestamp),
+                        isManual = prev?.isManual ?: false
+                    )
+                }
+                if (updatedAccounts.isNotEmpty()) {
+                    dao.upsertBankAccounts(updatedAccounts)
+                }
             }
 
             prefs.edit().putStringSet("jibeman_dedup_keys", importedKeys).apply()
@@ -634,16 +732,16 @@ class OrosiFinanceRepository(
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             prefs.edit()
                 .remove("jibeman_dedup_keys")
-                .remove("card_balances_v3_json")
+                .remove("card_balances_v4_json")
                 .remove("backup_snapshot_json")
                 .apply()
             dao.clearAllTransactions()
-            // Also remove any fake demo commitments
+            dao.clearAllBankAccounts()
             dao.getAllCommitmentsNow().filter { isDemoCommitment(it) }.forEach { demoC ->
                 dao.deleteCommitmentById(demoC.id)
             }
         }
-        val count = scanDeviceSmsInboxLast30Days(context, daysBack = 90)
+        val count = scanDeviceSmsInboxLast30Days(context, daysBack = 3650)
         if (count == 0 && dao.getAllTransactionsNow().isEmpty()) {
             getPrimaryPrefs()?.edit()?.putBoolean("has_real_bank_sms", false)?.apply()
             ensureSeeded()
@@ -651,13 +749,20 @@ class OrosiFinanceRepository(
         count
     }
 
+    /**
+     * Saves a voice-tagged expense or updates an untagged SMS transaction.
+     * NEVER defaults to "اسنپ‌مارکت" or "خرید روزمره"!
+     * Uses the user's exact spoken/typed purpose directly as `title` and `purpose`.
+     */
     suspend fun confirmVoiceExpense(
         parsedVoice: ParsedVoiceExpense,
         targetUntaggedTransactionId: Long? = null
     ) {
-        val currentSettings = dao.getSettingsNow() ?: AppSettingsEntity()
         val now = System.currentTimeMillis()
         val nowJalali = JalaliCalendarUtils.fromTimestamp(now)
+
+        val cleanPurpose = parsedVoice.purposeCategory.trim()
+        if (cleanPurpose.isBlank()) return
 
         if (targetUntaggedTransactionId != null) {
             val existing = dao.getTransactionById(targetUntaggedTransactionId)
@@ -666,17 +771,18 @@ class OrosiFinanceRepository(
                 val effectiveDong = parsedVoice.dongAmountToman.coerceAtMost(effectiveTotal)
                 val effectiveUserShare = (effectiveTotal - effectiveDong).coerceAtLeast(0L)
 
+                val resolvedStore = parsedVoice.storeName.trim().ifEmpty { existing.shortBankName }
                 val updatedTitle = if (effectiveDong > 0L) {
-                    "${parsedVoice.storeName} (${parsedVoice.purposeCategory} • سهم شما)"
+                    "$cleanPurpose (سهم شما)"
                 } else {
-                    "${parsedVoice.storeName} (${parsedVoice.purposeCategory})"
+                    cleanPurpose
                 }
 
                 dao.updateTransaction(
                     existing.copy(
                         title = updatedTitle,
-                        storeName = parsedVoice.storeName,
-                        purpose = parsedVoice.purposeCategory,
+                        storeName = resolvedStore,
+                        purpose = cleanPurpose,
                         userShareToman = effectiveUserShare,
                         dongAmountToman = effectiveDong,
                         dongFriendName = parsedVoice.dongFriendName,
@@ -688,7 +794,7 @@ class OrosiFinanceRepository(
                     dao.insertCommitment(
                         CommitmentEntity(
                             category = "DONG",
-                            title = "دنگ ${parsedVoice.purposeCategory} از ${parsedVoice.storeName}",
+                            title = "دنگ $cleanPurpose",
                             counterparty = "سهم ${parsedVoice.dongFriendName} • ${existing.cardInfo}",
                             amountToman = effectiveDong,
                             dueDateStr = "${existing.weekdayDate} • ${existing.timeStr}",
@@ -705,17 +811,18 @@ class OrosiFinanceRepository(
             }
         }
 
+        val resolvedStore = parsedVoice.storeName.trim().ifEmpty { "تراکنش صوتی" }
         val title = if (parsedVoice.dongAmountToman > 0L) {
-            "${parsedVoice.storeName} (${parsedVoice.purposeCategory} • سهم خالص شما)"
+            "$cleanPurpose (سهم خالص شما)"
         } else {
-            "${parsedVoice.storeName} (${parsedVoice.purposeCategory})"
+            cleanPurpose
         }
 
         dao.insertTransaction(
             TransactionEntity(
                 title = title,
-                storeName = parsedVoice.storeName,
-                purpose = parsedVoice.purposeCategory,
+                storeName = resolvedStore,
+                purpose = cleanPurpose,
                 totalAmountToman = parsedVoice.totalAmountToman,
                 userShareToman = parsedVoice.userShareToman,
                 dongAmountToman = parsedVoice.dongAmountToman,
@@ -725,7 +832,8 @@ class OrosiFinanceRepository(
                 cardInfo = parsedVoice.cardLabel,
                 type = "EXPENSE",
                 isUntagged = false,
-                timestamp = now
+                timestamp = now,
+                bankName = resolvedStore
             )
         )
 
@@ -733,7 +841,7 @@ class OrosiFinanceRepository(
             dao.insertCommitment(
                 CommitmentEntity(
                     category = "DONG",
-                    title = "دنگ ${parsedVoice.purposeCategory} از ${parsedVoice.storeName}",
+                    title = "دنگ $cleanPurpose",
                     counterparty = "سهم ${parsedVoice.dongFriendName} • پرداخت با ${parsedVoice.cardLabel}",
                     amountToman = parsedVoice.dongAmountToman,
                     dueDateStr = "${nowJalali.weekdayDate} • ${nowJalali.timeStr}",
@@ -745,16 +853,56 @@ class OrosiFinanceRepository(
             )
         }
 
-        val rawNewDaily = (currentSettings.dailySafeBudgetToman - parsedVoice.userShareToman).coerceAtLeast(25_000L)
-        val newDaily = PersianNumberUtils.roundDownToCleanThousands(rawNewDaily)
-        val newMonthly = (currentSettings.monthlyBalanceToman - parsedVoice.userShareToman).coerceAtLeast(25_000L)
-        dao.saveSettings(
-            currentSettings.copy(
-                dailySafeBudgetToman = newDaily,
-                monthlyBalanceToman = newMonthly
+        recalculateRealSafeToSpend()
+        persistSnapshotToSharedPrefs()
+    }
+
+    suspend fun toggleHideAmounts() {
+        val current = dao.getSettingsNow() ?: AppSettingsEntity()
+        dao.saveSettings(current.copy(hideAmounts = !current.hideAmounts))
+        persistSnapshotToSharedPrefs()
+    }
+
+    suspend fun setOnlyTankhahMode(onlyTankhah: Boolean) {
+        val current = dao.getSettingsNow() ?: AppSettingsEntity()
+        dao.saveSettings(current.copy(onlyTankhahMode = onlyTankhah))
+        recalculateRealSafeToSpend()
+        persistSnapshotToSharedPrefs()
+    }
+
+    suspend fun toggleAccountTankhah(bankName: String) {
+        val account = dao.getBankAccountByName(bankName) ?: return
+        dao.upsertBankAccount(account.copy(isTankhah = !account.isTankhah))
+        recalculateRealSafeToSpend()
+        persistSnapshotToSharedPrefs()
+    }
+
+    suspend fun addOrUpdateBankAccount(
+        bankName: String,
+        balanceToman: Long,
+        isTankhah: Boolean,
+        cardLast4: String = ""
+    ) {
+        val cleanName = bankName.trim().ifEmpty { return }
+        val existing = dao.getBankAccountByName(cleanName)
+        dao.upsertBankAccount(
+            BankAccountEntity(
+                bankName = cleanName,
+                nameEn = existing?.nameEn ?: "Custom Account",
+                balanceToman = balanceToman.coerceAtLeast(0L),
+                isTankhah = isTankhah,
+                cardLast4 = PersianNumberUtils.toPersianDigits(cardLast4.trim()),
+                lastUpdatedTimestamp = System.currentTimeMillis(),
+                isManual = true
             )
         )
+        recalculateRealSafeToSpend()
+        persistSnapshotToSharedPrefs()
+    }
 
+    suspend fun deleteTransaction(id: Long) {
+        dao.deleteTransactionById(id)
+        recalculateRealSafeToSpend()
         persistSnapshotToSharedPrefs()
     }
 
@@ -829,46 +977,10 @@ class OrosiFinanceRepository(
         persistSnapshotToSharedPrefs()
     }
 
-    suspend fun convertSurplusToGold(amountToman: Long) {
-        val settings = dao.getSettingsNow() ?: AppSettingsEntity()
-        val safeAmount = amountToman.coerceAtLeast(100_000L)
-        val addedGrams = safeAmount.toDouble() / settings.goldPrice18kToman.coerceAtLeast(1L).toDouble()
-        val newGoldGrams = ((settings.goldGrams + addedGrams) * 100.0).toLong() / 100.0
-        val newGoldValue = settings.goldReserveToman + safeAmount
-        val newMonthly = (settings.monthlyBalanceToman - safeAmount).coerceAtLeast(25_000L)
-
-        dao.saveSettings(
-            settings.copy(
-                goldReserveToman = newGoldValue,
-                goldGrams = newGoldGrams,
-                monthlyBalanceToman = newMonthly
-            )
-        )
-
-        val now = System.currentTimeMillis()
-        val nowJalali = JalaliCalendarUtils.fromTimestamp(now)
-
-        dao.insertTransaction(
-            TransactionEntity(
-                title = "تبدیل مازاد تراز به طلای ۱۸ عیار (${PersianNumberUtils.formatDecimal(addedGrams)} گرم)",
-                storeName = "قلک طلای ۱۸ عیار",
-                purpose = "تبدیل مازاد تراز به طلا",
-                totalAmountToman = safeAmount,
-                userShareToman = safeAmount,
-                weekdayDate = nowJalali.weekdayDate,
-                timeStr = nowJalali.timeStr,
-                cardInfo = "کارت بانکی",
-                type = "GOLD_SAVE",
-                isUntagged = false,
-                timestamp = now
-            )
-        )
-        persistSnapshotToSharedPrefs()
-    }
-
     suspend fun updateTransactionDetails(
         originalTx: TransactionEntity,
         amountToman: Long,
+        balanceAfterToman: Long?,
         weekdayDate: String,
         timeStr: String,
         cardInfo: String,
@@ -876,25 +988,37 @@ class OrosiFinanceRepository(
         storeName: String,
         specialTagMode: String
     ) {
-        val cleanStore = storeName.trim().ifEmpty { "فروشگاه" }
-        val cleanPurpose = purpose.trim().ifEmpty { "خرید روزمره" }
-        val newType = if (specialTagMode == "GOLD_SAVE") "GOLD_SAVE" else originalTx.type
-        val updatedTitle = "$cleanStore ($cleanPurpose)"
+        val cleanStore = storeName.trim().ifEmpty { originalTx.shortBankName }
+        val cleanPurpose = purpose.trim()
+        val updatedTitle = if (cleanPurpose.isNotEmpty() && cleanPurpose != "نیازمند تکمیل صوتی") {
+            cleanPurpose
+        } else {
+            originalTx.title
+        }
 
         dao.updateTransaction(
             originalTx.copy(
                 title = updatedTitle,
                 storeName = cleanStore,
-                purpose = cleanPurpose,
+                purpose = cleanPurpose.ifEmpty { originalTx.purpose },
                 totalAmountToman = amountToman,
                 userShareToman = amountToman,
-                weekdayDate = weekdayDate.trim(),
-                timeStr = timeStr.trim(),
-                cardInfo = cardInfo.trim(),
-                type = newType,
-                isUntagged = false
+                balanceAfterToman = balanceAfterToman,
+                weekdayDate = weekdayDate.trim().ifEmpty { originalTx.weekdayDate },
+                timeStr = timeStr.trim().ifEmpty { originalTx.timeStr },
+                cardInfo = cardInfo.trim().ifEmpty { originalTx.cardInfo },
+                isUntagged = cleanPurpose.isEmpty() || cleanPurpose == "نیازمند تکمیل صوتی"
             )
         )
+
+        // If user edited balanceAfterToman for the latest transaction of a bank, also update that bank's balance if applicable
+        if (balanceAfterToman != null && balanceAfterToman >= 0L) {
+            val bankKey = originalTx.shortBankName
+            val acc = dao.getBankAccountByName(bankKey)
+            if (acc != null && originalTx.timestamp >= acc.lastUpdatedTimestamp) {
+                dao.upsertBankAccount(acc.copy(balanceToman = balanceAfterToman))
+            }
+        }
 
         val now = System.currentTimeMillis()
         when (specialTagMode) {
@@ -902,7 +1026,7 @@ class OrosiFinanceRepository(
                 dao.insertCommitment(
                     CommitmentEntity(
                         category = "LOAN_INSTALLMENT",
-                        title = "قسط/وام: $cleanPurpose ($cleanStore)",
+                        title = "قسط/وام: ${cleanPurpose.ifEmpty { originalTx.title }}",
                         counterparty = cardInfo.trim(),
                         amountToman = amountToman,
                         dueDateStr = "$weekdayDate • $timeStr",
@@ -917,7 +1041,7 @@ class OrosiFinanceRepository(
                 dao.insertCommitment(
                     CommitmentEntity(
                         category = "DONG",
-                        title = "بدهی/طلب (دُنگ): $cleanPurpose از $cleanStore",
+                        title = "بدهی/طلب (دُنگ): ${cleanPurpose.ifEmpty { originalTx.title }}",
                         counterparty = "پرداخت با ${cardInfo.trim()}",
                         amountToman = amountToman,
                         dueDateStr = "$weekdayDate • $timeStr",
@@ -928,27 +1052,8 @@ class OrosiFinanceRepository(
                     )
                 )
             }
-            "GOLD_SAVE" -> {
-                if (originalTx.type != "GOLD_SAVE") {
-                    val settings = dao.getSettingsNow() ?: AppSettingsEntity()
-                    val addedGrams = amountToman.toDouble() / settings.goldPrice18kToman.coerceAtLeast(1L).toDouble()
-                    val newGoldGrams = ((settings.goldGrams + addedGrams) * 100.0).toLong() / 100.0
-                    dao.saveSettings(
-                        settings.copy(
-                            goldReserveToman = settings.goldReserveToman + amountToman,
-                            goldGrams = newGoldGrams
-                        )
-                    )
-                }
-            }
         }
         recalculateRealSafeToSpend()
-        persistSnapshotToSharedPrefs()
-    }
-
-    suspend fun toggleDailyAutoSaveGold(enabled: Boolean) {
-        val settings = dao.getSettingsNow() ?: AppSettingsEntity()
-        dao.saveSettings(settings.copy(dailyAutoSaveEnabled = enabled))
         persistSnapshotToSharedPrefs()
     }
 
@@ -960,14 +1065,12 @@ class OrosiFinanceRepository(
         dailySafeBudgetToman: Long
     ) {
         val settings = dao.getSettingsNow() ?: AppSettingsEntity()
-        val recalculatedGoldValue = (settings.goldGrams * goldPrice18kToman).toLong()
         dao.saveSettings(
             settings.copy(
                 paydayStartDay = paydayStartDay.coerceIn(1, 31),
                 paydayCycleLabel = paydayCycleLabel,
                 autoDetectSalary = autoDetectSalary,
                 goldPrice18kToman = goldPrice18kToman,
-                goldReserveToman = recalculatedGoldValue,
                 dailySafeBudgetToman = PersianNumberUtils.roundDownToCleanThousands(dailySafeBudgetToman)
             )
         )
@@ -977,11 +1080,12 @@ class OrosiFinanceRepository(
     suspend fun exportBackupJson(): String {
         val settings = dao.getSettingsNow() ?: AppSettingsEntity()
         val txs = dao.getAllTransactionsNow()
+        val accounts = dao.getAllBankAccountsNow()
         val commitments = dao.getAllCommitmentsNow()
 
         val root = JSONObject()
         root.put("app", "OrosiFinance_KhialRahat")
-        root.put("version", 3)
+        root.put("version", 4)
 
         val settingsObj = JSONObject().apply {
             put("dailySafeBudgetToman", PersianNumberUtils.roundDownToCleanThousands(settings.dailySafeBudgetToman))
@@ -989,12 +1093,26 @@ class OrosiFinanceRepository(
             put("paydayStartDay", settings.paydayStartDay)
             put("paydayCycleLabel", settings.paydayCycleLabel)
             put("autoDetectSalary", settings.autoDetectSalary)
-            put("goldPrice18kToman", settings.goldPrice18kToman)
-            put("goldReserveToman", settings.goldReserveToman)
-            put("goldGrams", settings.goldGrams)
-            put("dailyAutoSaveEnabled", settings.dailyAutoSaveEnabled)
+            put("hideAmounts", settings.hideAmounts)
+            put("onlyTankhahMode", settings.onlyTankhahMode)
         }
         root.put("settings", settingsObj)
+
+        val accArray = JSONArray()
+        accounts.forEach { acc ->
+            accArray.put(
+                JSONObject().apply {
+                    put("bankName", acc.bankName)
+                    put("nameEn", acc.nameEn)
+                    put("balanceToman", acc.balanceToman)
+                    put("isTankhah", acc.isTankhah)
+                    put("cardLast4", acc.cardLast4)
+                    put("lastUpdatedTimestamp", acc.lastUpdatedTimestamp)
+                    put("isManual", acc.isManual)
+                }
+            )
+        }
+        root.put("bankAccounts", accArray)
 
         val txArray = JSONArray()
         txs.forEach { tx ->
@@ -1013,6 +1131,9 @@ class OrosiFinanceRepository(
                     put("type", tx.type)
                     put("isUntagged", tx.isUntagged)
                     put("timestamp", tx.timestamp)
+                    if (tx.balanceAfterToman != null) put("balanceAfterToman", tx.balanceAfterToman)
+                    put("rawSmsBody", tx.rawSmsBody)
+                    put("bankName", tx.bankName)
                 }
             )
         }
@@ -1051,21 +1172,40 @@ class OrosiFinanceRepository(
             val root = JSONObject(jsonString)
             val sObj = root.optJSONObject("settings")
             if (sObj != null) {
-                val rawDaily = sObj.optLong("dailySafeBudgetToman", 680_000L).coerceAtLeast(25_000L)
+                val rawDaily = sObj.optLong("dailySafeBudgetToman", 680_000L).coerceAtLeast(0L)
                 dao.saveSettings(
                     AppSettingsEntity(
                         id = 1,
                         dailySafeBudgetToman = PersianNumberUtils.roundDownToCleanThousands(rawDaily),
-                        monthlyBalanceToman = sObj.optLong("monthlyBalanceToman", 18_450_000L).coerceAtLeast(25_000L),
+                        monthlyBalanceToman = sObj.optLong("monthlyBalanceToman", 18_450_000L).coerceAtLeast(0L),
                         paydayStartDay = sObj.optInt("paydayStartDay", 1),
                         paydayCycleLabel = sObj.optString("paydayCycleLabel", "۱ آبان تا ۳۰ آبان"),
                         autoDetectSalary = sObj.optBoolean("autoDetectSalary", true),
-                        goldPrice18kToman = sObj.optLong("goldPrice18kToman", 4_360_000L),
-                        goldReserveToman = sObj.optLong("goldReserveToman", 48_500_000L),
-                        goldGrams = sObj.optDouble("goldGrams", 11.12),
-                        dailyAutoSaveEnabled = sObj.optBoolean("dailyAutoSaveEnabled", true)
+                        hideAmounts = sObj.optBoolean("hideAmounts", false),
+                        onlyTankhahMode = sObj.optBoolean("onlyTankhahMode", false)
                     )
                 )
+            }
+
+            val accArray = root.optJSONArray("bankAccounts")
+            if (accArray != null) {
+                dao.clearAllBankAccounts()
+                val accList = mutableListOf<BankAccountEntity>()
+                for (i in 0 until accArray.length()) {
+                    val o = accArray.getJSONObject(i)
+                    accList.add(
+                        BankAccountEntity(
+                            bankName = o.optString("bankName"),
+                            nameEn = o.optString("nameEn"),
+                            balanceToman = o.optLong("balanceToman", 0L),
+                            isTankhah = o.optBoolean("isTankhah", true),
+                            cardLast4 = o.optString("cardLast4", ""),
+                            lastUpdatedTimestamp = o.optLong("lastUpdatedTimestamp", System.currentTimeMillis()),
+                            isManual = o.optBoolean("isManual", false)
+                        )
+                    )
+                }
+                dao.upsertBankAccounts(accList)
             }
 
             val txArray = root.optJSONArray("transactions")
@@ -1076,6 +1216,7 @@ class OrosiFinanceRepository(
                     val o = txArray.getJSONObject(i)
                     val ts = o.optLong("timestamp", System.currentTimeMillis())
                     val realJalali = JalaliCalendarUtils.fromTimestamp(ts)
+                    val balanceAfter = if (o.has("balanceAfterToman")) o.optLong("balanceAfterToman") else null
                     list.add(
                         TransactionEntity(
                             title = o.optString("title"),
@@ -1092,7 +1233,10 @@ class OrosiFinanceRepository(
                             cardInfo = o.optString("cardInfo", "کارت بانکی"),
                             type = o.optString("type", "EXPENSE"),
                             isUntagged = o.optBoolean("isUntagged", false),
-                            timestamp = ts
+                            timestamp = ts,
+                            balanceAfterToman = balanceAfter,
+                            rawSmsBody = o.optString("rawSmsBody", ""),
+                            bankName = o.optString("bankName", "")
                         )
                     )
                 }
@@ -1132,11 +1276,12 @@ class OrosiFinanceRepository(
 
     suspend fun resetToDefaultSeedData() {
         dao.clearAllTransactions()
+        dao.clearAllBankAccounts()
         dao.clearAllCommitments()
         getPrimaryPrefs()?.edit()
             ?.remove("backup_snapshot_json")
             ?.remove("jibeman_dedup_keys")
-            ?.remove("card_balances_v3_json")
+            ?.remove("card_balances_v4_json")
             ?.putBoolean("has_real_bank_sms", false)
             ?.apply()
         dao.saveSettings(
@@ -1145,12 +1290,10 @@ class OrosiFinanceRepository(
                 dailySafeBudgetToman = 680_000L,
                 monthlyBalanceToman = 18_450_000L,
                 paydayStartDay = 1,
-                paydayCycleLabel = "۱ آبان تا ۳۰ آبان ۱۴۰۳",
+                paydayCycleLabel = "۱ آبان تا ۳۰ آبان ۱۴۰۴",
                 autoDetectSalary = true,
-                goldPrice18kToman = 4_360_000L,
-                goldReserveToman = 48_500_000L,
-                goldGrams = 11.12,
-                dailyAutoSaveEnabled = true
+                hideAmounts = false,
+                onlyTankhahMode = false
             )
         )
         ensureSeeded()

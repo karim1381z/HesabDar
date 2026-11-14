@@ -9,6 +9,7 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -32,20 +33,22 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.CurrencyExchange
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.Sms
 import androidx.compose.material.icons.filled.Sync
-import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -63,6 +66,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -86,7 +90,6 @@ import com.example.data.local.AppSettingsEntity
 import com.example.data.local.CommitmentEntity
 import com.example.data.local.TransactionEntity
 import com.example.domain.JalaliCalendarUtils
-import com.example.domain.ParsedSmsResult
 import com.example.domain.PersianNumberUtils
 import com.example.ui.VoiceUiState
 import com.example.ui.theme.AlabasterSilk
@@ -107,7 +110,6 @@ import com.example.ui.theme.RubyRose
 import com.example.ui.theme.RubyRoseSoft
 import com.example.ui.theme.SaffronGold
 import com.example.ui.theme.SaffronGoldBright
-import com.example.ui.theme.SaffronGoldDeep
 import com.example.ui.theme.SaffronGoldLight
 import kotlin.math.sin
 
@@ -125,9 +127,13 @@ fun VoiceOverlayBottomSheet(
     var isLiveHardwareListening by remember { mutableStateOf(false) }
 
     val speechRecognizer = remember {
-        if (SpeechRecognizer.isRecognitionAvailable(context)) {
-            SpeechRecognizer.createSpeechRecognizer(context)
-        } else {
+        try {
+            if (SpeechRecognizer.isRecognitionAvailable(context)) {
+                SpeechRecognizer.createSpeechRecognizer(context)
+            } else {
+                null
+            }
+        } catch (_: Exception) {
             null
         }
     }
@@ -147,7 +153,6 @@ fun VoiceOverlayBottomSheet(
             }
             override fun onError(error: Int) {
                 isLiveHardwareListening = false
-                onSimulateVoiceRecord()
             }
             override fun onResults(results: Bundle?) {
                 isLiveHardwareListening = false
@@ -155,8 +160,6 @@ fun VoiceOverlayBottomSheet(
                 val firstSpoken = matches?.firstOrNull()
                 if (!firstSpoken.isNullOrBlank()) {
                     onSpeechChange(firstSpoken)
-                } else {
-                    onSimulateVoiceRecord()
                 }
             }
             override fun onPartialResults(partialResults: Bundle?) {
@@ -178,7 +181,7 @@ fun VoiceOverlayBottomSheet(
         }
     }
 
-    fun startRealOrFallbackRecognition() {
+    fun startRealOrFallbackRecognition(triggerSimFallbackIfUnavailable: Boolean = false) {
         if (speechRecognizer != null) {
             try {
                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -192,9 +195,9 @@ fun VoiceOverlayBottomSheet(
                 }
                 speechRecognizer.startListening(intent)
             } catch (_: Exception) {
-                onSimulateVoiceRecord()
+                if (triggerSimFallbackIfUnavailable) onSimulateVoiceRecord()
             }
-        } else {
+        } else if (triggerSimFallbackIfUnavailable) {
             onSimulateVoiceRecord()
         }
     }
@@ -203,9 +206,23 @@ fun VoiceOverlayBottomSheet(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            startRealOrFallbackRecognition()
+            startRealOrFallbackRecognition(triggerSimFallbackIfUnavailable = false)
+        }
+    }
+
+    // Immediately trigger SpeechRecognizer.startListening when opened
+    LaunchedEffect(Unit) {
+        val hasAudioPerm = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+        if (hasAudioPerm) {
+            startRealOrFallbackRecognition(triggerSimFallbackIfUnavailable = false)
         } else {
-            onSimulateVoiceRecord()
+            try {
+                recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            } catch (_: Exception) {
+            }
         }
     }
 
@@ -229,11 +246,42 @@ fun VoiceOverlayBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp)
                 .padding(bottom = 32.dp)
                 .testTag("voice_overlay_sheet"),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            val targetTx = voiceState.targetUntaggedTransaction
+            if (targetTx != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(OrosiSurfaceContainer)
+                        .border(1.dp, OrosiHairline, RoundedCornerShape(14.dp))
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "تراکنش بانک ${targetTx.shortBankName}",
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                            color = NishapurTurquoiseSoft
+                        )
+                        Text(
+                            text = PersianNumberUtils.formatToman(targetTx.totalAmountToman, showUnit = true),
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.ExtraBold),
+                            color = AlabasterSilk
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
             // 1. Glowing Turquoise Audio Wave
             Box(
                 modifier = Modifier
@@ -258,69 +306,118 @@ fun VoiceOverlayBottomSheet(
                             Manifest.permission.RECORD_AUDIO
                         ) == PackageManager.PERMISSION_GRANTED
                         if (hasAudioPerm) {
-                            startRealOrFallbackRecognition()
-                        } else if (SpeechRecognizer.isRecognitionAvailable(context)) {
-                            recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            startRealOrFallbackRecognition(triggerSimFallbackIfUnavailable = true)
                         } else {
-                            onSimulateVoiceRecord()
+                            try {
+                                recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            } catch (_: Exception) {
+                                onSimulateVoiceRecord()
+                            }
                         }
                     }
-                    .padding(vertical = 26.dp, horizontal = 20.dp)
+                    .padding(vertical = 20.dp, horizontal = 20.dp)
                     .testTag("voice_record_button"),
                 contentAlignment = Alignment.Center
             ) {
-                Canvas(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(68.dp)
-                ) {
-                    val barCount = 26
-                    val totalWidth = size.width
-                    val spacing = totalWidth / (barCount * 1.8f)
-                    val barWidth = spacing * 0.85f
-                    val centerY = size.height / 2f
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Canvas(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(54.dp)
+                    ) {
+                        val barCount = 26
+                        val totalWidth = size.width
+                        val spacing = totalWidth / (barCount * 1.8f)
+                        val barWidth = spacing * 0.85f
+                        val centerY = size.height / 2f
 
-                    for (i in 0 until barCount) {
-                        val norm = i.toFloat() / barCount.toFloat()
-                        val envelope = sin(norm * Math.PI).toFloat()
-                        val dynamicWave = if (isLiveHardwareListening || voiceState.isRecordingSimulated) {
-                            0.38f + 0.62f * kotlin.math.abs(sin(phase * 1.4f + i * 0.45f))
-                        } else {
-                            0.30f + 0.65f * kotlin.math.abs(sin(phase + i * 0.45f))
+                        for (i in 0 until barCount) {
+                            val norm = i.toFloat() / barCount.toFloat()
+                            val envelope = sin(norm * Math.PI).toFloat()
+                            val dynamicWave = if (isLiveHardwareListening || voiceState.isRecordingSimulated) {
+                                0.38f + 0.62f * kotlin.math.abs(sin(phase * 1.4f + i * 0.45f))
+                            } else {
+                                0.28f + 0.55f * kotlin.math.abs(sin(phase + i * 0.45f))
+                            }
+                            val barHeight = (size.height * 0.88f * envelope * dynamicWave).coerceAtLeast(10f)
+                            val x = (totalWidth - (barCount * (barWidth + spacing))) / 2f + i * (barWidth + spacing)
+
+                            drawRoundRect(
+                                color = if (i % 2 == 0) NishapurTurquoiseBright else NishapurTurquoiseSoft.copy(alpha = 0.78f),
+                                topLeft = Offset(x, centerY - barHeight / 2f),
+                                size = Size(barWidth, barHeight),
+                                cornerRadius = CornerRadius(barWidth / 2f, barWidth / 2f)
+                            )
                         }
-                        val barHeight = (size.height * 0.88f * envelope * dynamicWave).coerceAtLeast(10f)
-                        val x = (totalWidth - (barCount * (barWidth + spacing))) / 2f + i * (barWidth + spacing)
-
-                        drawRoundRect(
-                            color = if (i % 2 == 0) NishapurTurquoiseBright else NishapurTurquoiseSoft.copy(alpha = 0.78f),
-                            topLeft = Offset(x, centerY - barHeight / 2f),
-                            size = Size(barWidth, barHeight),
-                            cornerRadius = CornerRadius(barWidth / 2f, barWidth / 2f)
-                        )
                     }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = if (isLiveHardwareListening) "در حال شنیدن صدای شما... (بگویید بابت چه کاری بود)" else "برای ضبط مجدد صدا روی موج ضربه بزنید",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = NishapurTurquoiseSoft
+                    )
                 }
             }
 
-            Spacer(modifier = Modifier.height(22.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-            // 2. The Spoken Sentence
-            Text(
-                text = "«${voiceState.recognizedText}»",
-                style = MaterialTheme.typography.titleLarge.copy(
-                    lineHeight = 30.sp,
-                    fontWeight = FontWeight.Bold
-                ),
-                color = AlabasterSilk,
-                textAlign = TextAlign.Center,
+            // 2. Clean Live Text Input Box so the user can see/edit the recognized speech live before tapping "تأیید و ثبت"
+            OutlinedTextField(
+                value = voiceState.recognizedText,
+                onValueChange = onSpeechChange,
+                label = { Text("متن تشخیص داده شده / بابتِ تراکنش (قابل ویرایش)") },
+                placeholder = { Text("مثلاً: پفک، شارژ ایرانسل، نانوایی...") },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp)
-                    .testTag("recognized_speech_text")
+                    .testTag("voice_live_text_input"),
+                singleLine = false,
+                maxLines = 2,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = NishapurTurquoiseBright,
+                    unfocusedBorderColor = OrosiHairline
+                )
             )
 
-            Spacer(modifier = Modifier.height(26.dp))
+            if (voiceState.purposeCategory.isNotBlank()) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(OrosiSurfaceHigh)
+                        .border(1.dp, NishapurTurquoiseBright.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                        .testTag("recognized_speech_text"),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "عنوان ثبت‌شونده:",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = OrosiOnSurfaceVariant
+                    )
+                    Text(
+                        text = voiceState.purposeCategory,
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.ExtraBold),
+                        color = NishapurTurquoiseSoft
+                    )
+                }
+            } else {
+                // Keep testTag("recognized_speech_text") present even when empty
+                Text(
+                    text = "بگویید یا بنویسید این تراکنش بابت چه چیزی بود",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = OrosiOnSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .padding(top = 8.dp)
+                        .testTag("recognized_speech_text")
+                )
+            }
 
-            // 3. One Big Button ("تأیید")
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // 3. Confirm Button: "تأیید و ثبت"
             Button(
                 onClick = onConfirmVoiceEntry,
                 shape = RoundedCornerShape(18.dp),
@@ -328,14 +425,16 @@ fun VoiceOverlayBottomSheet(
                     containerColor = NishapurTurquoise,
                     contentColor = AlabasterSilk
                 ),
-                contentPadding = PaddingValues(vertical = 18.dp),
+                contentPadding = PaddingValues(vertical = 16.dp),
                 modifier = Modifier
                     .fillMaxWidth()
                     .border(1.dp, NishapurTurquoiseBright, RoundedCornerShape(18.dp))
                     .testTag("confirm_voice_entry_button")
             ) {
+                Icon(imageVector = Icons.Default.Check, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "تأیید",
+                    text = "تأیید و ثبت",
                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.ExtraBold)
                 )
             }
@@ -355,14 +454,9 @@ fun HeroMathBreakdownBottomSheet(
 
     val totalIncomeToman = remember(transactions) {
         transactions.filter { it.type == "INCOME" }.sumOf { it.userShareToman }
-            .takeIf { it > 0L } ?: 42_000_000L
     }
     val totalExpensesToman = remember(transactions) {
         transactions.filter { it.type == "EXPENSE" }.sumOf { it.userShareToman }
-    }
-    val totalGoldSavedThisMonthToman = remember(transactions) {
-        transactions.filter { it.type == "GOLD_SAVE" }.sumOf { it.userShareToman }
-            .takeIf { it > 0L } ?: 1_200_000L
     }
 
     ModalBottomSheet(
@@ -381,12 +475,11 @@ fun HeroMathBreakdownBottomSheet(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                text = "ترازنامه ماه حقوقی و سهم خرج امروزت",
+                text = "ترازنامه ماه حقوقی و وضعیت مالی",
                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                 color = AlabasterSilk
             )
 
-            // Stress-free Monthly Balance Report ("ترازنامه ماه حقوقی")
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -436,11 +529,6 @@ fun HeroMathBreakdownBottomSheet(
                     amountText = PersianNumberUtils.formatToman(reservedCommitmentsToman, showUnit = true),
                     valueColor = RoyalAmethystSoft
                 )
-                MonthlyReportRow(
-                    label = "تبدیل شده به طلا",
-                    amountText = PersianNumberUtils.formatToman(totalGoldSavedThisMonthToman, showUnit = true),
-                    valueColor = SaffronGoldLight
-                )
             }
 
             Row(
@@ -455,12 +543,12 @@ fun HeroMathBreakdownBottomSheet(
             ) {
                 Column {
                     Text(
-                        text = "سهم خرجِ امروزت",
+                        text = "سهم خرجِ روزانه پیشنهادی",
                         style = MaterialTheme.typography.titleSmall,
                         color = PersianLapisLight
                     )
                     Text(
-                        text = "تراز آزاد ماه: ${PersianNumberUtils.formatToman(settings.monthlyBalanceToman, showUnit = true)}",
+                        text = "موجودی کل حساب‌ها: ${PersianNumberUtils.formatToman(settings.monthlyBalanceToman, showUnit = true)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = NishapurTurquoiseSoft
                     )
@@ -562,7 +650,6 @@ fun CommitmentActionBottomSheet(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Primary 1-Tap Settlement CTA: "پاس شد / تسویه شد ✓"
             Button(
                 onClick = {
                     val parsedAmount = PersianNumberUtils.toEnglishDigits(amountStr).toLongOrNull()
@@ -687,189 +774,21 @@ fun CommitmentActionBottomSheet(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun GoldPartnerAffiliateBottomSheet(
-    settings: AppSettingsEntity,
-    onDirectPurchaseGold: (Long) -> Unit,
-    onDismiss: () -> Unit
-) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var selectedAmountToman by remember { mutableStateOf(2_000_000L) }
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = OrosiSurfaceLow,
-        contentColor = AlabasterSilk
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 22.dp)
-                .padding(bottom = 30.dp)
-                .testTag("gold_partner_modal"),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Verified,
-                        contentDescription = null,
-                        tint = SaffronGoldBright,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "پلتفرم‌های معتبر خرید آنلاین طلای ۱۸ عیار",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
-                        color = AlabasterSilk
-                    )
-                }
-                IconButton(onClick = onDismiss) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "بستن",
-                        tint = OrosiOnSurfaceVariant
-                    )
-                }
-            }
-
-            Text(
-                text = "همکاری رسمی اُرسی با پلتفرم‌های دارای مجوز اتحادیه طلا و جواهر و صندوق‌های طلای بورس (کارمزد ویژه ۰٪ برای کاربران خیال راحت):",
-                style = MaterialTheme.typography.bodySmall,
-                color = OrosiOnSurfaceVariant
-            )
-
-            // Partner 1
-            PartnerPlatformItem(
-                name = "صندوق‌های طلای بورس (عیار / لوتوس / کهربا)",
-                subtitle = "تحت نظارت سازمان بورس • معاف از مالیات • نقدشوندگی آنی",
-                badge = "کارمزد ۰٪ اُرسی"
-            )
-
-            // Partner 2
-            PartnerPlatformItem(
-                name = "خزانه طلای آب‌شده ۱۸ عیار (تحویل فیزیکی و آنلاین)",
-                subtitle = "دارای مجوز رسمی اتحادیه طلا و شمش بانک مرکزی",
-                badge = "پشتوانه فیزیکی"
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                listOf(1_000_000L, 2_000_000L, 5_000_000L).forEach { amt ->
-                    val isSelected = selectedAmountToman == amt
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (isSelected) SaffronGold else OrosiSurfaceContainer)
-                            .border(
-                                1.dp,
-                                if (isSelected) SaffronGoldBright else OrosiHairline,
-                                RoundedCornerShape(12.dp)
-                            )
-                            .clickable { selectedAmountToman = amt }
-                            .padding(vertical = 10.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = PersianNumberUtils.formatToman(amt, showUnit = true),
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                            color = AlabasterSilk,
-                            maxLines = 1,
-                            softWrap = false
-                        )
-                    }
-                }
-            }
-
-            Button(
-                onClick = { onDirectPurchaseGold(selectedAmountToman) },
-                shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = SaffronGold,
-                    contentColor = AlabasterSilk
-                ),
-                contentPadding = PaddingValues(vertical = 16.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, SaffronGoldBright, RoundedCornerShape(16.dp))
-                    .testTag("confirm_partner_gold_purchase_button")
-            ) {
-                Icon(imageVector = Icons.Default.CurrencyExchange, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "ثبت خرید بدون کارمزد و افزودن به قلک طلا",
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun PartnerPlatformItem(
-    name: String,
-    subtitle: String,
-    badge: String
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(OrosiSurfaceHigh)
-            .border(1.dp, SaffronGoldBright.copy(alpha = 0.28f), RoundedCornerShape(16.dp))
-            .padding(14.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = name,
-                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                color = AlabasterSilk,
-                modifier = Modifier.weight(1f)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(SaffronGoldDeep)
-                    .padding(horizontal = 8.dp, vertical = 3.dp)
-            ) {
-                Text(
-                    text = badge,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = SaffronGoldLight
-                )
-            }
-        }
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = subtitle,
-            style = MaterialTheme.typography.bodySmall,
-            color = OrosiOnSurfaceVariant
-        )
-    }
-}
-
+/**
+ * 4. Jibeman-Style Transaction Details Modal (`TransactionDetailAndEditBottomSheet`):
+ * - Top 4 badges: Direction (`دریافتی` / `پرداختی`), Bank (`بلو`, `سپه`, etc.), Jalali Date (`۲۲ آبان ۱۴۰۵`), and Time (`۱۲:۲۱`) + a top-left Trash icon to delete the transaction.
+ * - `مبلغ (تومان)` AND `مانده حساب پس از تراکنش (تومان)`.
+ * - `توضیحات / بابت` field with a direct Microphone button right inside the field + collapsible "مشاهده متن اصلی پیامک بانک".
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TransactionDetailAndEditBottomSheet(
     transaction: TransactionEntity,
     onQuickVoiceRetag: (TransactionEntity) -> Unit,
+    onDeleteTransaction: (TransactionEntity) -> Unit,
     onSaveEdits: (
         amountToman: Long,
+        balanceAfterToman: Long?,
         weekdayDate: String,
         timeStr: String,
         cardInfo: String,
@@ -879,29 +798,50 @@ fun TransactionDetailAndEditBottomSheet(
     ) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var amountStr by remember(transaction) {
-        mutableStateOf(PersianNumberUtils.formatToman(transaction.userShareToman.takeIf { it > 0L } ?: transaction.totalAmountToman))
-    }
-    var weekdayDateStr by remember(transaction) {
-        val base = transaction.weekdayDate
-        val jalaliYearStr = PersianNumberUtils.toPersianDigits(
-            JalaliCalendarUtils.fromTimestamp(transaction.timestamp).year.toString()
-        )
-        mutableStateOf(if (base.contains("۱۴۰")) base else "$base $jalaliYearStr")
-    }
-    var timeStr by remember(transaction) { mutableStateOf(transaction.timeStr) }
-    var cardInfoStr by remember(transaction) { mutableStateOf(transaction.cardInfo) }
-    var purposeStr by remember(transaction) {
-        mutableStateOf(if (transaction.isUntagged) "" else transaction.purpose)
-    }
-    var storeStr by remember(transaction) {
-        mutableStateOf(if (transaction.isUntagged) "" else transaction.storeName)
-    }
-    var specialTagMode by remember(transaction) {
-        mutableStateOf(if (transaction.type == "GOLD_SAVE") "GOLD_SAVE" else "NORMAL")
+    val jalaliInfo = remember(transaction.timestamp) {
+        JalaliCalendarUtils.fromTimestamp(transaction.timestamp)
     }
 
+    var amountStr by remember(transaction) {
+        mutableStateOf(
+            PersianNumberUtils.formatToman(
+                transaction.userShareToman.takeIf { it > 0L } ?: transaction.totalAmountToman
+            )
+        )
+    }
+    var balanceAfterStr by remember(transaction) {
+        mutableStateOf(
+            transaction.balanceAfterToman?.let { PersianNumberUtils.formatToman(it) } ?: ""
+        )
+    }
+    var purposeStr by remember(transaction) {
+        val initialPurpose = if (transaction.isUntagged ||
+            transaction.purpose == "نیازمند تکمیل صوتی" ||
+            transaction.purpose == "برداشت کارتی / خرید" ||
+            transaction.purpose == "واریز به حساب"
+        ) {
+            ""
+        } else {
+            transaction.purpose
+        }
+        mutableStateOf(initialPurpose)
+    }
+    var storeStr by remember(transaction) {
+        mutableStateOf(
+            if (transaction.isUntagged || transaction.storeName == "نامشخص") {
+                transaction.shortBankName
+            } else {
+                transaction.storeName
+            }
+        )
+    }
+    var specialTagMode by remember(transaction) {
+        mutableStateOf("NORMAL")
+    }
+    var showRawSms by remember { mutableStateOf(false) }
+
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val isIncome = transaction.type == "INCOME"
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -917,61 +857,92 @@ fun TransactionDetailAndEditBottomSheet(
                 .padding(bottom = 28.dp)
                 .testTag("transaction_detail_sheet")
         ) {
+            // Header Row: Title (Right in RTL) + Trash Icon & Close Icon (Left in RTL)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "جزئیات کامل و ویرایش تراکنش",
+                    text = "جزئیات تراکنش",
                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                     color = AlabasterSilk
                 )
-                IconButton(onClick = onDismiss) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "بستن",
-                        tint = OrosiOnSurfaceVariant
-                    )
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = { onDeleteTransaction(transaction) },
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(RubyRose.copy(alpha = 0.16f))
+                            .testTag("delete_transaction_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DeleteOutline,
+                            contentDescription = "حذف تراکنش",
+                            tint = RubyRoseSoft,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "بستن",
+                            tint = OrosiOnSurfaceVariant
+                        )
+                    }
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-            // Quick Voice Re-tagging Button
+            // Top 4 Jibeman Badges: Direction (دریافتی / پرداختی), Bank (بلو, سپه...), Jalali Date (۲۲ آبان ۱۴۰۵), Time (۱۲:۲۱)
             Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(NishapurTurquoiseDeep)
-                    .border(1.dp, NishapurTurquoiseBright, RoundedCornerShape(14.dp))
-                    .clickable { onQuickVoiceRetag(transaction) }
-                    .padding(vertical = 12.dp, horizontal = 16.dp)
-                    .testTag("sheet_voice_retag_button")
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = Icons.Default.Mic,
-                    contentDescription = null,
-                    tint = NishapurTurquoiseBright,
-                    modifier = Modifier.size(20.dp)
+                // Badge 1: Direction
+                JibemanDetailBadge(
+                    text = if (isIncome) "دریافتی" else "پرداختی",
+                    bgColor = if (isIncome) NishapurTurquoiseDeep else RubyRose.copy(alpha = 0.25f),
+                    borderColor = if (isIncome) NishapurTurquoiseBright else RubyRoseSoft,
+                    textColor = if (isIncome) NishapurTurquoiseSoft else RubyRoseSoft
                 )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "تکمیل یا ویرایش سریع با صدای فارسی",
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                    color = AlabasterSilk
+                // Badge 2: Bank
+                JibemanDetailBadge(
+                    text = "بانک ${transaction.shortBankName}",
+                    bgColor = PersianLapis,
+                    borderColor = PersianLapisLight.copy(alpha = 0.5f),
+                    textColor = AlabasterSilk
+                )
+                // Badge 3: Jalali Date
+                JibemanDetailBadge(
+                    text = jalaliInfo.dateWithYear,
+                    bgColor = OrosiSurfaceHigh,
+                    borderColor = OrosiHairline,
+                    textColor = AlabasterSilk
+                )
+                // Badge 4: Time
+                JibemanDetailBadge(
+                    text = transaction.timeStr,
+                    bgColor = OrosiSurfaceHigh,
+                    borderColor = OrosiHairline,
+                    textColor = SaffronGoldLight
                 )
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // 1) مبلغ (تومان)
             OutlinedTextField(
                 value = amountStr,
                 onValueChange = { amountStr = PersianNumberUtils.toPersianDigits(it) },
-                label = { Text("۱) مبلغ (تومان)") },
+                label = { Text("مبلغ (تومان)") },
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("detail_amount_input"),
@@ -984,50 +955,15 @@ fun TransactionDetailAndEditBottomSheet(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // 2) تاریخ شمسی + روز هفته دقیق & 3) ساعت دقیق
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                OutlinedTextField(
-                    value = weekdayDateStr,
-                    onValueChange = { weekdayDateStr = PersianNumberUtils.toPersianDigits(it) },
-                    label = { Text("۲) تاریخ شمسی و روز هفته") },
-                    modifier = Modifier
-                        .weight(1.45f)
-                        .testTag("detail_date_input"),
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = NishapurTurquoiseBright,
-                        unfocusedBorderColor = OrosiHairline
-                    )
-                )
-
-                OutlinedTextField(
-                    value = timeStr,
-                    onValueChange = { timeStr = PersianNumberUtils.toPersianDigits(it) },
-                    label = { Text("۳) ساعت دقیق") },
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("detail_time_input"),
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = NishapurTurquoiseBright,
-                        unfocusedBorderColor = OrosiHairline
-                    )
-                )
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // 4) کارت بانکی و ۴ رقم آخر
+            // 2) مانده حساب پس از تراکنش (تومان)
             OutlinedTextField(
-                value = cardInfoStr,
-                onValueChange = { cardInfoStr = PersianNumberUtils.toPersianDigits(it) },
-                label = { Text("۴) کارت بانکی و ۴ رقم آخر") },
+                value = balanceAfterStr,
+                onValueChange = { balanceAfterStr = PersianNumberUtils.toPersianDigits(it) },
+                label = { Text("مانده حساب پس از تراکنش (تومان)") },
+                placeholder = { Text("مثلاً: ۹۸۴,۴۳۳") },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .testTag("detail_card_input"),
+                    .testTag("detail_balance_after_input"),
                 singleLine = true,
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = NishapurTurquoiseBright,
@@ -1037,12 +973,30 @@ fun TransactionDetailAndEditBottomSheet(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // 5) بابتِ (Category/Purpose)
+            // 3) توضیحات / بابت field with a direct Microphone button right inside the field
             OutlinedTextField(
                 value = purposeStr,
                 onValueChange = { purposeStr = it },
-                label = { Text("۵) بابتِ (دسته‌بندی / علت تراکنش)") },
-                placeholder = { Text("مثلاً: خرید میوه و تره‌بار") },
+                label = { Text("توضیحات / بابت") },
+                placeholder = { Text("مثلاً: پفک، شارژ ایرانسل، نانوایی...") },
+                trailingIcon = {
+                    IconButton(
+                        onClick = { onQuickVoiceRetag(transaction) },
+                        modifier = Modifier
+                            .padding(end = 4.dp)
+                            .clip(CircleShape)
+                            .background(NishapurTurquoise)
+                            .size(36.dp)
+                            .testTag("sheet_voice_retag_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Mic,
+                            contentDescription = "ثبت صوتی بابت",
+                            tint = AlabasterSilk,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("detail_purpose_input"),
@@ -1053,28 +1007,67 @@ fun TransactionDetailAndEditBottomSheet(
                 )
             )
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // 6) از فروشگاه (Merchant/Store)
-            OutlinedTextField(
-                value = storeStr,
-                onValueChange = { storeStr = it },
-                label = { Text("۶) از فروشگاه (نام پذیرنده)") },
-                placeholder = { Text("مثلاً: اسنپ‌مارکت") },
+            // Collapsible "مشاهده متن اصلی پیامک بانک"
+            val smsBodyText = transaction.rawSmsBody.ifBlank {
+                "بانک ${transaction.shortBankName}\nمبلغ: ${PersianNumberUtils.formatToman(transaction.totalAmountToman * 10L)} ریال\nتاریخ: ${jalaliInfo.dateWithYear} - ${transaction.timeStr}"
+            }
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .testTag("detail_store_input"),
-                singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = NishapurTurquoiseBright,
-                    unfocusedBorderColor = OrosiHairline
-                )
-            )
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(OrosiSurfaceContainer)
+                    .border(1.dp, OrosiHairline, RoundedCornerShape(14.dp))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showRawSms = !showRawSms }
+                        .padding(horizontal = 14.dp, vertical = 12.dp)
+                        .testTag("toggle_raw_sms_button"),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Sms,
+                            contentDescription = null,
+                            tint = PersianLapisLight,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "مشاهده متن اصلی پیامک بانک",
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                            color = PersianLapisLight
+                        )
+                    }
+                    Icon(
+                        imageVector = if (showRawSms) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = null,
+                        tint = OrosiOnSurfaceVariant
+                    )
+                }
+
+                AnimatedVisibility(visible = showRawSms) {
+                    Text(
+                        text = smsBodyText,
+                        style = MaterialTheme.typography.bodySmall.copy(lineHeight = 20.sp),
+                        color = AlabasterSilk,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp)
+                            .padding(bottom = 12.dp)
+                            .testTag("raw_sms_body_text")
+                    )
+                }
+            }
 
             Spacer(modifier = Modifier.height(14.dp))
 
             Text(
-                text = "تبدیل یا نشانه‌گذاری نوع تراکنش:",
+                text = "نشانه‌گذاری نوع تراکنش:",
                 style = MaterialTheme.typography.labelLarge,
                 color = OrosiOnSurfaceVariant
             )
@@ -1083,9 +1076,8 @@ fun TransactionDetailAndEditBottomSheet(
 
             val modeOptions = listOf(
                 "NORMAL" to "خرج عادی",
-                "INSTALLMENT" to "قسط/وام",
-                "DONG" to "بدهی/طلب (دُنگ)",
-                "GOLD_SAVE" to "تبدیل به طلا"
+                "INSTALLMENT" to "وام و قسط",
+                "DONG" to "بدهی و طلب (دُنگ)"
             )
             Row(
                 modifier = Modifier
@@ -1098,7 +1090,6 @@ fun TransactionDetailAndEditBottomSheet(
                     val activeColor = when (modeKey) {
                         "INSTALLMENT" -> RoyalAmethyst
                         "DONG" -> NishapurTurquoise
-                        "GOLD_SAVE" -> SaffronGold
                         else -> PersianLapis
                     }
                     Box(
@@ -1131,17 +1122,17 @@ fun TransactionDetailAndEditBottomSheet(
                 onClick = {
                     val parsedAmount = PersianNumberUtils.toEnglishDigits(amountStr).toLongOrNull()
                         ?: transaction.totalAmountToman
-                    val cleanWeekdayDate = weekdayDateStr
-                        .replace(Regex("۱۴۰[۰-۹]"), "")
-                        .trim()
-                        .ifEmpty { transaction.weekdayDate }
+                    val parsedBalanceAfter = PersianNumberUtils.toEnglishDigits(balanceAfterStr)
+                        .toLongOrNull()
+                        ?: transaction.balanceAfterToman
                     onSaveEdits(
                         parsedAmount,
-                        cleanWeekdayDate,
-                        timeStr.ifBlank { transaction.timeStr },
-                        cardInfoStr.ifBlank { transaction.cardInfo },
-                        purposeStr.ifBlank { "خرید روزمره" },
-                        storeStr.ifBlank { "فروشگاه" },
+                        parsedBalanceAfter,
+                        transaction.weekdayDate,
+                        transaction.timeStr,
+                        transaction.cardInfo,
+                        purposeStr.trim(),
+                        storeStr.trim().ifEmpty { transaction.shortBankName },
                         specialTagMode
                     )
                 },
@@ -1160,6 +1151,166 @@ fun TransactionDetailAndEditBottomSheet(
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = "ذخیره تغییرات",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun JibemanDetailBadge(
+    text: String,
+    bgColor: Color,
+    borderColor: Color,
+    textColor: Color
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(bgColor)
+            .border(1.dp, borderColor, RoundedCornerShape(50))
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+            color = textColor,
+            maxLines = 1,
+            softWrap = false
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AddBankAccountBottomSheet(
+    onAddAccount: (bankName: String, balanceToman: Long, isTankhah: Boolean, cardLast4: String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var bankName by remember { mutableStateOf("") }
+    var balanceStr by remember { mutableStateOf("") }
+    var cardLast4 by remember { mutableStateOf("") }
+    var isTankhah by remember { mutableStateOf(true) }
+
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = OrosiSurfaceLow,
+        contentColor = AlabasterSilk
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 28.dp)
+                .testTag("add_bank_account_sheet"),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.AccountBalance,
+                        contentDescription = null,
+                        tint = NishapurTurquoiseBright
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "افزودن منبع مالی / حساب جدید",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = AlabasterSilk
+                    )
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "بستن",
+                        tint = OrosiOnSurfaceVariant
+                    )
+                }
+            }
+
+            OutlinedTextField(
+                value = bankName,
+                onValueChange = { bankName = it },
+                label = { Text("نام بانک یا منبع مالی (مثلاً: ملت، ویپاد، کیف پول)") },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("add_account_name_input"),
+                singleLine = true
+            )
+
+            OutlinedTextField(
+                value = balanceStr,
+                onValueChange = { balanceStr = PersianNumberUtils.toPersianDigits(it) },
+                label = { Text("موجودی فعلی (تومان)") },
+                placeholder = { Text("مثلاً: ۲,۵۰۰,۰۰۰") },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("add_account_balance_input"),
+                singleLine = true
+            )
+
+            OutlinedTextField(
+                value = cardLast4,
+                onValueChange = { cardLast4 = PersianNumberUtils.toPersianDigits(it) },
+                label = { Text("۴ رقم آخر کارت (اختیاری)") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(OrosiSurfaceContainer)
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "حساب تنخواه (خرج روزمره)",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = AlabasterSilk
+                )
+                Switch(
+                    checked = isTankhah,
+                    onCheckedChange = { isTankhah = it },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = AlabasterSilk,
+                        checkedTrackColor = NishapurTurquoise
+                    )
+                )
+            }
+
+            Button(
+                onClick = {
+                    val cleanBank = bankName.trim().ifEmpty { "حساب جدید" }
+                    val parsedBalance = PersianNumberUtils.toEnglishDigits(balanceStr).toLongOrNull() ?: 0L
+                    onAddAccount(cleanBank, parsedBalance, isTankhah, cardLast4)
+                },
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = NishapurTurquoise,
+                    contentColor = AlabasterSilk
+                ),
+                contentPadding = PaddingValues(vertical = 16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, NishapurTurquoiseBright, RoundedCornerShape(16.dp))
+                    .testTag("submit_new_account_button")
+            ) {
+                Icon(imageVector = Icons.Default.Check, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "ذخیره منبع مالی",
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 )
             }
@@ -1207,7 +1358,7 @@ fun SmsSimulatorBottomSheet(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "اتصال خودکار به پیامک همه بانکها: فعال ✓",
+                        text = "اتصال خودکار به پیامک همه بانک‌ها: فعال ✓",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
                         color = AlabasterSilk
                     )
@@ -1231,17 +1382,17 @@ fun SmsSimulatorBottomSheet(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    text = "✓ دریافت و تفکیک ۱۰۰٪ خودکار در پس‌زمینه (بدون نیاز به ثبت دستی)",
+                    text = "✓ اسکن کامل صندوق پیامک و شناسایی تمام بانک‌های شما",
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                     color = NishapurTurquoiseSoft
                 )
                 Text(
-                    text = "پشتیبانی خودکار از تمام بانک‌های ایران: بلوبانک، ملت، ملی، صادرات، تجارت، سامان، پاسارگاد، رسالت، سپه، مسکن، رفاه، آینده، پارسیان، اقتصاد نوین، مهر ایران، کشاورزی، سینا، شهر، گردشگری، ویپاد و آبانک.",
+                    text = "پشتیبانی خودکار از تمام بانک‌های ایران: بلوبانک، سپه، پاسارگاد، ملت، ویپاد، ملی، صادرات، تجارت، سامان، رسالت، مسکن، رفاه، آینده، پارسیان، اقتصاد نوین، مهر ایران، کشاورزی، سینا، شهر، گردشگری و آبانک.",
                     style = MaterialTheme.typography.bodySmall,
                     color = OrosiOnSurfaceVariant
                 )
                 Text(
-                    text = "• تفکیک هوشمند «مبلغ تراکنش» از «مانده حساب» و حذف خودکار پیامک‌های رمز پویا",
+                    text = "• استخراج آخرین مانده هر بانک حتی از پیامک‌های ماه‌های گذشته و نادیده گرفتن ۱۰۰٪ پیامک‌های تبلیغاتی (دیجی‌کالا، اسنپ، تپسی)",
                     style = MaterialTheme.typography.bodySmall,
                     color = SaffronGoldLight
                 )
@@ -1267,7 +1418,7 @@ fun SmsSimulatorBottomSheet(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "پاکسازی و بازخوانی تمیز پیامکهای واقعی",
+                    text = "پاکسازی و بازخوانی تمیز پیامک‌های واقعی",
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
                 )
             }
@@ -1290,9 +1441,6 @@ fun PaydayAndBackupBottomSheet(
         mutableStateOf(PersianNumberUtils.toPersianDigits(settings.paydayStartDay.toString()))
     }
     var autoDetectSalary by remember(settings) { mutableStateOf(settings.autoDetectSalary) }
-    var goldPriceStr by remember(settings) {
-        mutableStateOf(PersianNumberUtils.toPersianDigits(settings.goldPrice18kToman.toString()))
-    }
     var dailySafeStr by remember(settings) {
         mutableStateOf(PersianNumberUtils.toPersianDigits(settings.dailySafeBudgetToman.toString()))
     }
@@ -1321,7 +1469,7 @@ fun PaydayAndBackupBottomSheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "تنظیمات ماه حقوقی، نرخ طلا و پشتیبان",
+                    text = "تنظیمات ماه حقوقی و پشتیبان آفلاین",
                     style = MaterialTheme.typography.titleLarge,
                     color = AlabasterSilk
                 )
@@ -1367,7 +1515,7 @@ fun PaydayAndBackupBottomSheet(
                 OutlinedTextField(
                     value = dailySafeStr,
                     onValueChange = { dailySafeStr = PersianNumberUtils.toPersianDigits(it) },
-                    label = { Text("سهم خرج امروز (تومان)") },
+                    label = { Text("سهم خرج روزانه (تومان)") },
                     modifier = Modifier.weight(1.4f),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = NishapurTurquoiseBright,
@@ -1375,21 +1523,6 @@ fun PaydayAndBackupBottomSheet(
                     )
                 )
             }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            OutlinedTextField(
-                value = goldPriceStr,
-                onValueChange = { goldPriceStr = PersianNumberUtils.toPersianDigits(it) },
-                label = { Text("نرخ لحظه‌ای هر گرم طلای ۱۸ عیار (تومان)") },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("gold_price_input"),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = SaffronGoldBright,
-                    unfocusedBorderColor = OrosiHairline
-                )
-            )
 
             Spacer(modifier = Modifier.height(10.dp))
 
@@ -1423,9 +1556,8 @@ fun PaydayAndBackupBottomSheet(
             Button(
                 onClick = {
                     val day = PersianNumberUtils.toEnglishDigits(paydayDayStr).toIntOrNull() ?: 1
-                    val goldPrice = PersianNumberUtils.toEnglishDigits(goldPriceStr).toLongOrNull() ?: 4_360_000L
                     val dailySafe = PersianNumberUtils.toEnglishDigits(dailySafeStr).toLongOrNull() ?: 680_000L
-                    onSaveSettings(day, cycleLabel, autoDetectSalary, goldPrice, dailySafe)
+                    onSaveSettings(day, cycleLabel, autoDetectSalary, settings.goldPrice18kToman, dailySafe)
                 },
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(
@@ -1523,15 +1655,16 @@ fun PaydayAndBackupBottomSheet(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddCommitmentBottomSheet(
+    defaultCategory: String = "SAYYAD_ISSUED",
     onAddCommitment: (String, String, String, Long, String, String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var category by remember { mutableStateOf("SAYYAD_ISSUED") }
-    var title by remember { mutableStateOf("چک صیادی خرید تجهیزات") }
-    var counterparty by remember { mutableStateOf("در وجه: فروشگاه دیجیتال آریا") }
-    var amountStr by remember { mutableStateOf("۱۲,۰۰۰,۰۰۰") }
-    var dueDateStr by remember { mutableStateOf("سررسید: ۳۰ آبان ۱۴۰۳") }
-    var sayyadId by remember { mutableStateOf("۴۰۳۷۷۸۱۹۲۰۳۸۴۷۵۶") }
+    var category by remember(defaultCategory) { mutableStateOf(defaultCategory) }
+    var title by remember { mutableStateOf("") }
+    var counterparty by remember { mutableStateOf("") }
+    var amountStr by remember { mutableStateOf("") }
+    var dueDateStr by remember { mutableStateOf("") }
+    var sayyadId by remember { mutableStateOf("") }
 
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -1550,16 +1683,52 @@ fun AddCommitmentBottomSheet(
                 .testTag("add_commitment_sheet")
         ) {
             Text(
-                text = "+ ثبت و استعلام چک جدید",
+                text = "ثبت تعهد جدید (چک، قسط یا دُنگ)",
                 style = MaterialTheme.typography.titleLarge,
                 color = AlabasterSilk
             )
             Spacer(modifier = Modifier.height(12.dp))
 
+            val categoryOptions = listOf(
+                "SAYYAD_ISSUED" to "چک صیادی",
+                "LOAN_INSTALLMENT" to "وام و قسط",
+                "DONG" to "بدهی و طلب (دُنگ)"
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                categoryOptions.forEach { (catKey, catLabel) ->
+                    val selected = category == catKey
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (selected) RoyalAmethyst else OrosiSurfaceContainer)
+                            .border(
+                                1.dp,
+                                if (selected) RoyalAmethystSoft else OrosiHairline,
+                                RoundedCornerShape(12.dp)
+                            )
+                            .clickable { category = catKey }
+                            .padding(vertical = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = catLabel,
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = AlabasterSilk
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
             OutlinedTextField(
                 value = title,
                 onValueChange = { title = it },
-                label = { Text("عنوان چک یا قسط") },
+                label = { Text("عنوان (مثلاً: چک اجاره، قسط وام، دنگ شام)") },
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(modifier = Modifier.height(8.dp))
@@ -1567,13 +1736,21 @@ fun AddCommitmentBottomSheet(
                 value = amountStr,
                 onValueChange = { amountStr = PersianNumberUtils.toPersianDigits(it) },
                 label = { Text("مبلغ (تومان)") },
+                placeholder = { Text("مثلاً: ۱۲,۰۰۰,۰۰۰") },
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedTextField(
                 value = dueDateStr,
                 onValueChange = { dueDateStr = it },
-                label = { Text("تاریخ سررسید") },
+                label = { Text("تاریخ سررسید (مثلاً: ۳۰ آبان ۱۴۰۴)") },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = counterparty,
+                onValueChange = { counterparty = it },
+                label = { Text("طرف حساب / بانک") },
                 modifier = Modifier.fillMaxWidth()
             )
 
@@ -1582,7 +1759,9 @@ fun AddCommitmentBottomSheet(
             Button(
                 onClick = {
                     val amount = PersianNumberUtils.toEnglishDigits(amountStr).toLongOrNull() ?: 5_000_000L
-                    onAddCommitment(category, title, counterparty, amount, dueDateStr, sayyadId)
+                    val cleanTitle = title.trim().ifEmpty { "تعهد مالی جدید" }
+                    val cleanDate = dueDateStr.trim().ifEmpty { "سررسید این ماه" }
+                    onAddCommitment(category, cleanTitle, counterparty.trim(), amount, cleanDate, sayyadId)
                 },
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(
@@ -1597,83 +1776,7 @@ fun AddCommitmentBottomSheet(
                 Icon(imageVector = Icons.Default.VerifiedUser, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "تأیید و ثبت چک",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                )
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ConvertSurplusToGoldBottomSheet(
-    settings: AppSettingsEntity,
-    onConvert: (Long) -> Unit,
-    onDismiss: () -> Unit
-) {
-    var amountStr by remember { mutableStateOf("۱,۵۰۰,۰۰۰") }
-    val amountToman = PersianNumberUtils.toEnglishDigits(amountStr).toLongOrNull() ?: 1_500_000L
-    val equivalentGrams = amountToman.toDouble() / settings.goldPrice18kToman.coerceAtLeast(1L).toDouble()
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = OrosiSurfaceLow,
-        contentColor = AlabasterSilk
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 28.dp)
-                .testTag("convert_gold_sheet")
-        ) {
-            Text(
-                text = "تبدیل مازاد تراز به طلای ۱۸ عیار",
-                style = MaterialTheme.typography.titleLarge,
-                color = AlabasterSilk
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-
-            OutlinedTextField(
-                value = amountStr,
-                onValueChange = { amountStr = PersianNumberUtils.toPersianDigits(it) },
-                label = { Text("مبلغ تبدیل (تومان)") },
-                modifier = Modifier.fillMaxWidth(),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = SaffronGoldBright,
-                    unfocusedBorderColor = OrosiHairline
-                )
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            Text(
-                text = "معادل: ${PersianNumberUtils.formatDecimal(equivalentGrams, 3)} گرم طلای ۱۸ عیار",
-                style = MaterialTheme.typography.titleSmall,
-                color = NishapurTurquoiseBright
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Button(
-                onClick = { onConvert(amountToman) },
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = SaffronGold,
-                    contentColor = AlabasterSilk
-                ),
-                contentPadding = PaddingValues(vertical = 14.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("confirm_convert_gold_button")
-            ) {
-                Icon(imageVector = Icons.Default.CurrencyExchange, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "تأیید",
+                    text = "تأیید و ثبت",
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 )
             }

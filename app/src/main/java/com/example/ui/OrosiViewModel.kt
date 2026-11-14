@@ -4,11 +4,13 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.AppSettingsEntity
+import com.example.data.local.BankAccountEntity
 import com.example.data.local.CommitmentEntity
 import com.example.data.local.OrosiDatabase
 import com.example.data.local.TransactionEntity
 import com.example.data.repository.OrosiFinanceRepository
 import com.example.domain.BankSmsParserEngine
+import com.example.domain.JalaliCalendarUtils
 import com.example.domain.ParsedSmsResult
 import com.example.domain.ParsedVoiceExpense
 import com.example.domain.PersianNumberUtils
@@ -22,35 +24,39 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 enum class OrosiScreen(val route: String, val persianTitle: String) {
-    DASHBOARD("dashboard", "امروز من"),
-    COMMITMENTS("commitments", "قسط و چک"),
-    INFLATION_SHIELD("inflation_shield", "قلک طلا")
+    HOME("home", "خانه"),
+    TRANSACTIONS("transactions", "تراکنش‌ها"),
+    ACCOUNTS("accounts", "حساب‌ها"),
+    TOOLS("tools", "ابزارها")
 }
 
 enum class CommitmentTab(val title: String) {
     SAYYAD("چک صیادی"),
-    INSTALLMENTS("اقساط وام"),
-    DONG("دُنگ")
+    INSTALLMENTS("وام و قسط"),
+    DONG("بدهی و طلب (دُنگ)"),
+    REPORTS("گزارش‌گیری دخل و خرج")
 }
 
 data class VoiceUiState(
     val isRecordingSimulated: Boolean = false,
-    val recognizedText: String = "پانصد هزار تومان خرید میوه از اسنپ‌مارکت با کارت بلو که ۲۰۰ تومنش دنگ علی بود",
-    val storeName: String = "اسنپ‌مارکت",
-    val purposeCategory: String = "خرید میوه و تره‌بار",
-    val cardLabel: String = "کارت بلو ۶۲۱۹",
-    val totalAmountToman: Long = 500_000L,
-    val dongAmountToman: Long = 200_000L,
-    val dongFriendName: String = "علی",
-    val userShareToman: Long = 300_000L,
+    val recognizedText: String = "",
+    val storeName: String = "",
+    val purposeCategory: String = "",
+    val cardLabel: String = "کارت بانکی",
+    val totalAmountToman: Long = 0L,
+    val dongAmountToman: Long = 0L,
+    val dongFriendName: String = "",
+    val userShareToman: Long = 0L,
     val targetUntaggedTransaction: TransactionEntity? = null
 )
 
 data class OrosiUiState(
-    val currentScreen: OrosiScreen = OrosiScreen.DASHBOARD,
+    val currentScreen: OrosiScreen = OrosiScreen.HOME,
     val selectedCommitmentTab: CommitmentTab = CommitmentTab.SAYYAD,
+    val selectedYearMonthKey: Int = JalaliCalendarUtils.fromTimestamp(System.currentTimeMillis()).yearMonthKey,
     val settings: AppSettingsEntity = AppSettingsEntity(),
     val transactions: List<TransactionEntity> = emptyList(),
+    val bankAccounts: List<BankAccountEntity> = emptyList(),
     val commitments: List<CommitmentEntity> = emptyList(),
     val voiceState: VoiceUiState = VoiceUiState(),
     val selectedTransactionForDetail: TransactionEntity? = null,
@@ -60,8 +66,7 @@ data class OrosiUiState(
     val showSmsSimulatorModal: Boolean = false,
     val showPaydayBackupModal: Boolean = false,
     val showAddCommitmentModal: Boolean = false,
-    val showConvertGoldModal: Boolean = false,
-    val showGoldPartnerModal: Boolean = false,
+    val showAddBankAccountModal: Boolean = false,
     val backupJsonText: String = "",
     val statusBannerMessage: String? = null
 )
@@ -71,8 +76,11 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
     private val dao = OrosiDatabase.getInstance(appContext).orosiDao()
     private val repository = OrosiFinanceRepository(dao, appContext)
 
-    private val _currentScreen = MutableStateFlow(OrosiScreen.DASHBOARD)
+    private val _currentScreen = MutableStateFlow(OrosiScreen.HOME)
     private val _selectedCommitmentTab = MutableStateFlow(CommitmentTab.SAYYAD)
+    private val _selectedYearMonthKey = MutableStateFlow(
+        JalaliCalendarUtils.fromTimestamp(System.currentTimeMillis()).yearMonthKey
+    )
     private val _voiceState = MutableStateFlow(VoiceUiState())
     private val _selectedTransactionForDetail = MutableStateFlow<TransactionEntity?>(null)
     private val _selectedCommitmentForAction = MutableStateFlow<CommitmentEntity?>(null)
@@ -81,15 +89,13 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
     private val _showSmsSimulatorModal = MutableStateFlow(false)
     private val _showPaydayBackupModal = MutableStateFlow(false)
     private val _showAddCommitmentModal = MutableStateFlow(false)
-    private val _showConvertGoldModal = MutableStateFlow(false)
-    private val _showGoldPartnerModal = MutableStateFlow(false)
+    private val _showAddBankAccountModal = MutableStateFlow(false)
     private val _backupJsonText = MutableStateFlow("")
     private val _statusBannerMessage = MutableStateFlow<String?>(null)
 
     init {
         viewModelScope.launch {
             repository.ensureSeeded()
-            parseAndUpdateVoiceState(_voiceState.value.recognizedText, null)
         }
     }
 
@@ -106,6 +112,18 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
             settings = settings ?: AppSettingsEntity(),
             transactions = txs,
             commitments = commitments
+        )
+    }.combine(
+        combine(
+            repository.bankAccountsFlow,
+            _selectedYearMonthKey
+        ) { accounts, ymKey ->
+            Pair(accounts, ymKey)
+        }
+    ) { base, (accounts, ymKey) ->
+        base.copy(
+            bankAccounts = accounts,
+            selectedYearMonthKey = ymKey
         )
     }.combine(
         combine(
@@ -130,18 +148,16 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
             _selectedTransactionForDetail,
             _selectedCommitmentForAction,
             _showAddCommitmentModal,
-            _showConvertGoldModal,
-            _showGoldPartnerModal
-        ) { selectedTx, selectedComm, addComm, goldModal, partnerModal ->
-            Tuple5(selectedTx, selectedComm, addComm, goldModal, partnerModal)
+            _showAddBankAccountModal
+        ) { selectedTx, selectedComm, addComm, addAcc ->
+            Tuple4(selectedTx, selectedComm, addComm, addAcc)
         }
     ) { state, extra ->
         state.copy(
             selectedTransactionForDetail = extra.first,
             selectedCommitmentForAction = extra.second,
             showAddCommitmentModal = extra.third,
-            showConvertGoldModal = extra.fourth,
-            showGoldPartnerModal = extra.fifth
+            showAddBankAccountModal = extra.fourth
         )
     }.combine(
         combine(_backupJsonText, _statusBannerMessage) { backup, banner ->
@@ -166,6 +182,56 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
         _selectedCommitmentTab.value = tab
     }
 
+    fun changeSelectedMonth(deltaMonths: Int) {
+        val current = _selectedYearMonthKey.value
+        var year = current / 100
+        var month = (current % 100) + deltaMonths
+        while (month < 1) {
+            month += 12
+            year -= 1
+        }
+        while (month > 12) {
+            month -= 12
+            year += 1
+        }
+        _selectedYearMonthKey.value = year * 100 + month
+    }
+
+    fun toggleHideAmounts() {
+        viewModelScope.launch {
+            repository.toggleHideAmounts()
+        }
+    }
+
+    fun setOnlyTankhahMode(onlyTankhah: Boolean) {
+        viewModelScope.launch {
+            repository.setOnlyTankhahMode(onlyTankhah)
+        }
+    }
+
+    fun toggleAccountTankhah(bankName: String) {
+        viewModelScope.launch {
+            repository.toggleAccountTankhah(bankName)
+        }
+    }
+
+    fun setShowAddBankAccountModal(show: Boolean) {
+        _showAddBankAccountModal.value = show
+    }
+
+    fun addOrUpdateBankAccount(
+        bankName: String,
+        balanceToman: Long,
+        isTankhah: Boolean,
+        cardLast4: String = ""
+    ) {
+        viewModelScope.launch {
+            repository.addOrUpdateBankAccount(bankName, balanceToman, isTankhah, cardLast4)
+            _showAddBankAccountModal.value = false
+            showBanner("منبع مالی «$bankName» با موجودی ${PersianNumberUtils.formatToman(balanceToman, true)} ذخیره شد.")
+        }
+    }
+
     fun setShowHeroMathSheet(show: Boolean) {
         _showHeroMathSheet.value = show
     }
@@ -178,9 +244,18 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
         _selectedTransactionForDetail.value = null
     }
 
+    fun deleteTransaction(tx: TransactionEntity) {
+        viewModelScope.launch {
+            repository.deleteTransaction(tx.id)
+            _selectedTransactionForDetail.value = null
+            showBanner("تراکنش از فهرست حذف شد.")
+        }
+    }
+
     fun saveTransactionEdits(
         originalTx: TransactionEntity,
         amountToman: Long,
+        balanceAfterToman: Long?,
         weekdayDate: String,
         timeStr: String,
         cardInfo: String,
@@ -192,6 +267,7 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
             repository.updateTransactionDetails(
                 originalTx = originalTx,
                 amountToman = amountToman,
+                balanceAfterToman = balanceAfterToman,
                 weekdayDate = weekdayDate,
                 timeStr = timeStr,
                 cardInfo = cardInfo,
@@ -200,7 +276,8 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
                 specialTagMode = specialTagMode
             )
             _selectedTransactionForDetail.value = null
-            showBanner("جزئیات تراکنش «$storeName» با موفقیت ذخیره شد.")
+            val displayLabel = purpose.trim().ifEmpty { originalTx.displayTitle }
+            showBanner("جزئیات تراکنش «$displayLabel» ذخیره شد ✓")
         }
     }
 
@@ -243,31 +320,56 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Opens the Voice Bottom Sheet with an EMPTY transcript (`""`)—never hardcoded "اسنپ‌مارکت"!
+     */
     fun openVoiceOverlayNew() {
-        val defaultSpeech = "پانصد هزار تومان خرید میوه از اسنپ‌مارکت با کارت بلو که ۲۰۰ تومنش دنگ علی بود"
-        parseAndUpdateVoiceState(defaultSpeech, null)
+        _voiceState.value = VoiceUiState(
+            isRecordingSimulated = false,
+            recognizedText = "",
+            storeName = "",
+            purposeCategory = "",
+            cardLabel = "کارت بانکی",
+            totalAmountToman = 0L,
+            dongAmountToman = 0L,
+            dongFriendName = "",
+            userShareToman = 0L,
+            targetUntaggedTransaction = null
+        )
         _showVoiceOverlaySheet.value = true
     }
 
+    /**
+     * Opens the Voice Bottom Sheet for an untagged transaction with an EMPTY transcript (`""`)
+     * (or its existing custom purpose if already tagged), NEVER defaulting to "اسنپ‌مارکت" or "خرید روزمره"!
+     */
     fun openVoiceForUntaggedTransaction(tx: TransactionEntity) {
         _selectedTransactionForDetail.value = null
-        val suggestedSpeech = "${PersianNumberUtils.formatToman(tx.totalAmountToman)} تومان خرید میوه از اسنپ‌مارکت با ${tx.cardInfo} که ۱۰۰ تومنش دنگ علی بود"
-        val parsed = PersianVoiceSlangParserEngine.parseSpokenText(
-            suggestedSpeech,
-            fallbackTotalToman = tx.totalAmountToman
-        )
+        val initialSpeech = if (!tx.isUntagged &&
+            tx.purpose.isNotBlank() &&
+            tx.purpose != "نیازمند تکمیل صوتی" &&
+            tx.purpose != "برداشت کارتی / خرید"
+        ) {
+            tx.purpose
+        } else {
+            ""
+        }
+
         _voiceState.value = VoiceUiState(
             isRecordingSimulated = false,
-            recognizedText = suggestedSpeech,
-            storeName = parsed.storeName,
-            purposeCategory = parsed.purposeCategory,
+            recognizedText = initialSpeech,
+            storeName = tx.shortBankName,
+            purposeCategory = initialSpeech,
             cardLabel = tx.cardInfo,
             totalAmountToman = tx.totalAmountToman,
-            dongAmountToman = parsed.dongAmountToman,
-            dongFriendName = parsed.dongFriendName,
-            userShareToman = parsed.userShareToman,
+            dongAmountToman = tx.dongAmountToman,
+            dongFriendName = tx.dongFriendName,
+            userShareToman = tx.userShareToman,
             targetUntaggedTransaction = tx
         )
+        if (initialSpeech.isNotBlank()) {
+            parseAndUpdateVoiceState(initialSpeech, tx)
+        }
         _showVoiceOverlaySheet.value = true
     }
 
@@ -281,9 +383,10 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun parseAndUpdateVoiceState(speech: String, targetTx: TransactionEntity?) {
-        val parsed = PersianVoiceSlangParserEngine.parseSpokenText(
-            speech,
-            fallbackTotalToman = targetTx?.totalAmountToman
+        val parsed = PersianVoiceSlangParserEngine.parseVoiceCommand(
+            rawSpeech = speech,
+            fallbackTotalToman = targetTx?.totalAmountToman,
+            defaultBankName = targetTx?.shortBankName ?: ""
         )
         _voiceState.value = _voiceState.value.copy(
             recognizedText = speech,
@@ -298,18 +401,26 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    /**
+     * Fallback voice simulation when running on a web emulator without a microphone.
+     * Uses realistic everyday phrases like "پفک خریدم", "شارژ ایرانسل", "نانوایی سنگک", "کافه قهوه"
+     * and NEVER uses "اسنپ‌مارکت"!
+     */
     fun triggerVoiceSimulation(samplePhrase: String? = null) {
         viewModelScope.launch {
             _voiceState.value = _voiceState.value.copy(isRecordingSimulated = true)
-            delay(750L)
-            val phrases = listOf(
-                "پانصد هزار تومان خرید میوه از اسنپ‌مارکت با کارت بلو که ۲۰۰ تومنش دنگ علی بود",
-                "هشتصد تومن شام رستوران نایب با کارت ملت که نصفش دنگ سارا بود",
-                "دویست و پنجاه تومن قهوه و کیک از کافه لمیز با کارت سامان",
-                "یک میلیون و دویست خرید لباس از دیجی‌کالا با کارت ملی که ۴۰۰ تومنش دنگ رضا بود"
-            )
-            val nextPhrase = samplePhrase ?: phrases.firstOrNull { it != _voiceState.value.recognizedText } ?: phrases.first()
-            parseAndUpdateVoiceState(nextPhrase, _voiceState.value.targetUntaggedTransaction)
+            delay(500L)
+            if (samplePhrase != null) {
+                parseAndUpdateVoiceState(samplePhrase, _voiceState.value.targetUntaggedTransaction)
+            } else if (_voiceState.value.recognizedText.isBlank()) {
+                val targetTx = _voiceState.value.targetUntaggedTransaction
+                val phrase = when {
+                    targetTx != null && targetTx.totalAmountToman == 49_500L -> "شارژ ایرانسل"
+                    targetTx != null -> "پفک خریدم"
+                    else -> "صد هزار تومان پفک خریدم"
+                }
+                parseAndUpdateVoiceState(phrase, targetTx)
+            }
             _voiceState.value = _voiceState.value.copy(isRecordingSimulated = false)
         }
     }
@@ -317,24 +428,23 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
     fun confirmVoiceEntry() {
         viewModelScope.launch {
             val v = _voiceState.value
-            val parsed = ParsedVoiceExpense(
-                recognizedSpeech = v.recognizedText,
-                totalAmountToman = v.totalAmountToman,
-                userShareToman = v.userShareToman,
-                dongAmountToman = v.dongAmountToman,
-                dongFriendName = v.dongFriendName,
-                storeName = v.storeName,
-                purposeCategory = v.purposeCategory,
-                cardLabel = v.cardLabel
+            val parsed = PersianVoiceSlangParserEngine.parseVoiceCommand(
+                rawSpeech = v.recognizedText,
+                fallbackTotalToman = v.targetUntaggedTransaction?.totalAmountToman ?: v.totalAmountToman.takeIf { it > 0L },
+                defaultBankName = v.targetUntaggedTransaction?.shortBankName ?: ""
             )
+            if (parsed.purposeCategory.isBlank()) {
+                showBanner("لطفاً توضیح تراکنش را بگویید یا بنویسید.")
+                return@launch
+            }
             repository.confirmVoiceExpense(parsed, v.targetUntaggedTransaction?.id)
-            val msg = if (v.dongAmountToman > 0L && v.dongFriendName.isNotBlank()) {
-                "ثبت شد! فقط سهم شما (${PersianNumberUtils.formatToman(v.userShareToman, true)}) کسر شد و دنگ ${v.dongFriendName} کنار گذاشته شد."
+            val msg = if (parsed.dongAmountToman > 0L && parsed.dongFriendName.isNotBlank()) {
+                "ثبت شد! «${parsed.purposeCategory}» — فقط سهم شما (${PersianNumberUtils.formatToman(parsed.userShareToman, true)}) کسر شد."
             } else {
-                "«${v.storeName}» به مبلغ ${PersianNumberUtils.formatToman(v.userShareToman, true)} ثبت شد."
+                "تراکنش با عنوان «${parsed.purposeCategory}» ثبت شد ✓"
             }
             _showVoiceOverlaySheet.value = false
-            _voiceState.value = _voiceState.value.copy(targetUntaggedTransaction = null)
+            _voiceState.value = VoiceUiState()
             showBanner(msg)
         }
     }
@@ -363,13 +473,13 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun autoSyncSmsSilently() {
         viewModelScope.launch {
-            repository.scanDeviceSmsInboxLast30Days(appContext, daysBack = 60)
+            repository.scanDeviceSmsInboxLast30Days(appContext, daysBack = 3650)
         }
     }
 
     fun scanDeviceSmsInboxLast30Days() {
         viewModelScope.launch {
-            val count = repository.scanDeviceSmsInboxLast30Days(appContext, daysBack = 60)
+            val count = repository.scanDeviceSmsInboxLast30Days(appContext, daysBack = 3650)
             _showSmsSimulatorModal.value = false
             if (count > 0) {
                 val countStr = PersianNumberUtils.toPersianDigits(count.toString())
@@ -387,7 +497,7 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
             _showSmsSimulatorModal.value = false
             val countStr = PersianNumberUtils.toPersianDigits(count.toString())
             if (count > 0) {
-                showBanner("پاکسازی انجام شد و $countStr پیامک واقعی بانک با تاریخ و مبلغ دقیق بازخوانی شد ✓")
+                showBanner("پاکسازی انجام شد و $countStr پیامک واقعی بانک با مانده حساب‌ها بازخوانی شد ✓")
             } else {
                 showBanner("پاکسازی و بازخوانی تمیز پیامک‌های بانکی انجام شد ✓")
             }
@@ -421,7 +531,7 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
                 dailySafeBudgetToman = dailySafeBudgetToman
             )
             _showPaydayBackupModal.value = false
-            showBanner("تنظیمات ماه حقوقی و نرخ طلا ذخیره شد.")
+            showBanner("تنظیمات ماه حقوقی ذخیره شد.")
         }
     }
 
@@ -476,23 +586,6 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun setShowConvertGoldModal(show: Boolean) {
-        _showConvertGoldModal.value = show
-    }
-
-    fun setShowGoldPartnerModal(show: Boolean) {
-        _showGoldPartnerModal.value = show
-    }
-
-    fun convertSurplusToGold(amountToman: Long) {
-        viewModelScope.launch {
-            repository.convertSurplusToGold(amountToman)
-            _showConvertGoldModal.value = false
-            _showGoldPartnerModal.value = false
-            showBanner("مبلغ ${PersianNumberUtils.formatToman(amountToman, true)} به قلک طلای ۱۸ عیار افزوده شد.")
-        }
-    }
-
     fun dismissBanner() {
         _statusBannerMessage.value = null
     }
@@ -507,6 +600,13 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 }
+
+private data class Tuple4<A, B, C, D>(
+    val first: A,
+    val second: B,
+    val third: C,
+    val fourth: D
+)
 
 private data class Tuple5<A, B, C, D, E>(
     val first: A,

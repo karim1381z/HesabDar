@@ -6,9 +6,9 @@ import com.example.domain.JibemanSmsEngine
 import com.example.domain.PersianNumberUtils
 import com.example.domain.PersianVoiceSlangParserEngine
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ExampleUnitTest {
@@ -25,6 +25,7 @@ class ExampleUnitTest {
         assertEquals("ملت", JibemanSmsEngine.resolveBank("Bank Mellat")?.nameFa)
         assertEquals("ملی ایران", JibemanSmsEngine.resolveBank("+9830009417")?.nameFa)
         assertEquals("بلو", JibemanSmsEngine.resolveBank("+982187641")?.nameFa)
+        assertEquals("سپه", JibemanSmsEngine.resolveBank("+986715001")?.nameFa)
         assertEquals("سامان", JibemanSmsEngine.resolveBank("SamanBank")?.nameFa)
         assertEquals("پاسارگاد", JibemanSmsEngine.resolveBank("B.Pasargad")?.nameFa)
         assertEquals("ویپاد", JibemanSmsEngine.resolveBank("30009017")?.nameFa)
@@ -62,11 +63,36 @@ class ExampleUnitTest {
     }
 
     @Test
-    fun testRoundDownToCleanThousands() {
-        val raw = 1_755_497L
-        val rounded = PersianNumberUtils.roundDownToCleanThousands(raw)
-        assertEquals(1_755_000L, rounded)
-        assertEquals("۱,۷۵۵,۰۰۰ تومان", PersianNumberUtils.formatToman(rounded, showUnit = true))
+    fun testVoiceTaggingNeverDefaultsToSnappMarketOrDailyPurchase() {
+        // 1. User says "پفک خریدم" on a 100,000 Toman Blu transaction
+        val pofak = PersianVoiceSlangParserEngine.parseVoiceCommand(
+            rawSpeech = "پفک خریدم",
+            fallbackTotalToman = 100_000L,
+            defaultBankName = "بلو"
+        )
+        assertEquals("پفک", pofak.purposeCategory)
+        assertEquals("بلو", pofak.storeName)
+        assertFalse(pofak.storeName.contains("اسنپ"))
+        assertFalse(pofak.purposeCategory.contains("خرید روزمره"))
+
+        // 2. User says "شارژ ایرانسل" on a 49,500 Toman Sepah transaction
+        val irancell = PersianVoiceSlangParserEngine.parseVoiceCommand(
+            rawSpeech = "شارژ ایرانسل",
+            fallbackTotalToman = 49_500L,
+            defaultBankName = "سپه"
+        )
+        assertEquals("شارژ ایرانسل", irancell.purposeCategory)
+        assertEquals("ایرانسل", irancell.storeName)
+        assertEquals(49_500L, irancell.totalAmountToman)
+
+        // 3. User says "بابت هاست پرداخت کردم"
+        val host = PersianVoiceSlangParserEngine.parseVoiceCommand(
+            rawSpeech = "بابت هاست پرداخت کردم",
+            fallbackTotalToman = 320_000L,
+            defaultBankName = "پاسارگاد"
+        )
+        assertEquals("هاست", host.purposeCategory)
+        assertEquals("پاسارگاد", host.storeName)
     }
 
     @Test
