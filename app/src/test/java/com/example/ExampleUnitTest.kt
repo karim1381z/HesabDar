@@ -114,6 +114,19 @@ class ExampleUnitTest {
         assertEquals("نانوایی", p1.purposeCategory)
         assertEquals("نقدی / دستی", p1.cardLabel)
 
+        val pNoonvaei = PersianVoiceSlangParserEngine.parseSpokenText("۳۹ تومن نونوایی")
+        assertEquals(39_000L, pNoonvaei.totalAmountToman)
+        assertEquals("نونوایی", pNoonvaei.purposeCategory)
+        assertEquals("نقدی / دستی", pNoonvaei.cardLabel)
+
+        val pNanvaei70 = PersianVoiceSlangParserEngine.parseSpokenText("۷۰ تومن نانوایی")
+        assertEquals(70_000L, pNanvaei70.totalAmountToman)
+        assertEquals("نانوایی", pNanvaei70.purposeCategory)
+
+        val pNanvaeiSpoken70 = PersianVoiceSlangParserEngine.parseSpokenText("هفتاد تومن نانوایی")
+        assertEquals(70_000L, pNanvaeiSpoken70.totalAmountToman)
+        assertEquals("نانوایی", pNanvaeiSpoken70.purposeCategory)
+
         val p2 = PersianVoiceSlangParserEngine.parseSpokenText("۳۰۰ تومن میوه")
         assertEquals(300_000L, p2.totalAmountToman)
         assertEquals("نقدی / دستی", p2.storeName)
@@ -143,5 +156,23 @@ class ExampleUnitTest {
         assertEquals(1403, jy)
         assertEquals(8, jm)
         assertEquals(14, jd)
+
+        // 1403 is a leap year (30 Esfand = 2025-03-20)
+        val (jyLeap, jmLeap, jdLeap) = JalaliCalendarUtils.gregorianToJalali(2025, 3, 20)
+        assertEquals(1403, jyLeap)
+        assertEquals(12, jmLeap)
+        assertEquals(30, jdLeap)
+
+        // 1405 Nowruz = 2026-03-21
+        val (jy1405, jm1405, jd1405) = JalaliCalendarUtils.gregorianToJalali(2026, 3, 21)
+        assertEquals(1405, jy1405)
+        assertEquals(1, jm1405)
+        assertEquals(1, jd1405)
+
+        // 2026-11-14 = 23 Aban 1405
+        val (jyAban, jmAban, jdAban) = JalaliCalendarUtils.gregorianToJalali(2026, 11, 14)
+        assertEquals(1405, jyAban)
+        assertEquals(8, jmAban)
+        assertEquals(23, jdAban)
     }
 }

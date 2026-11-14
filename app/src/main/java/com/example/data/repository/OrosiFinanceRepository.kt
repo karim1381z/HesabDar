@@ -328,6 +328,25 @@ class OrosiFinanceRepository(
             }
         }
 
+        // Deduplicate any duplicate SMS transactions in Room DB (preferring user-tagged rows)
+        val remainingTxs = dao.getAllTransactionsNow()
+        val smsGroups = remainingTxs
+            .filter { it.rawSmsBody.isNotBlank() }
+            .groupBy { tx ->
+                "${tx.bankName}|${tx.totalAmountToman}|${tx.type}|${tx.timestamp / 60_000L}|${tx.rawSmsBody.trim().hashCode()}"
+            }
+        for ((_, group) in smsGroups) {
+            if (group.size > 1) {
+                val keeper = group.sortedWith(
+                    compareBy<TransactionEntity> { it.isUntagged }
+                        .thenBy { it.id }
+                ).first()
+                group.filter { it.id != keeper.id }.forEach { dup ->
+                    dao.deleteTransactionById(dup.id)
+                }
+            }
+        }
+
         // One-time normalization so only the primary spending bank ("بلو" or the first bank) defaults to isTankhah = true
         val normalizedV5 = prefs?.getBoolean("tankhah_default_normalized_v5", false) == true
         if (!normalizedV5) {
@@ -533,33 +552,26 @@ class OrosiFinanceRepository(
             return fullResult
         }
 
-        if (!fullResult.isMicroFee) {
-            val txType = when {
-                fullResult.isSelfTransfer -> "SELF_TRANSFER"
-                isDeposit -> "INCOME"
-                else -> "EXPENSE"
-            }
-            val userShare = if (fullResult.isSelfTransfer) 0L else amountToman
+        val txType = if (isDeposit) "INCOME" else "EXPENSE"
 
-            dao.insertTransaction(
-                TransactionEntity(
-                    title = fullResult.detectedTitle,
-                    storeName = fullResult.detectedStore,
-                    purpose = fullResult.detectedPurpose,
-                    totalAmountToman = amountToman,
-                    userShareToman = userShare,
-                    weekdayDate = fullResult.weekdayDate,
-                    timeStr = fullResult.timeStr,
-                    cardInfo = fullResult.cardLabel,
-                    type = txType,
-                    isUntagged = fullResult.isUntaggedPurchase,
-                    timestamp = timestampMillis,
-                    balanceAfterToman = balanceToman,
-                    rawSmsBody = rawSms,
-                    bankName = bankName
-                )
+        dao.insertTransaction(
+            TransactionEntity(
+                title = fullResult.detectedTitle,
+                storeName = fullResult.detectedStore,
+                purpose = fullResult.detectedPurpose,
+                totalAmountToman = amountToman,
+                userShareToman = amountToman,
+                weekdayDate = fullResult.weekdayDate,
+                timeStr = fullResult.timeStr,
+                cardInfo = fullResult.cardLabel,
+                type = txType,
+                isUntagged = !isDeposit,
+                timestamp = timestampMillis,
+                balanceAfterToman = balanceToman,
+                rawSmsBody = rawSms,
+                bankName = bankName
             )
-        }
+        )
 
         importedKeys.add(uniqueDedupKey)
         prefs?.edit()?.putStringSet("jibeman_dedup_keys", importedKeys)?.apply()
@@ -590,11 +602,29 @@ class OrosiFinanceRepository(
         smsSyncMutex.withLock {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             val hadRealSmsBefore = prefs.getBoolean("has_real_bank_sms", false)
+            val cleanLedgerV7Done = prefs.getBoolean("jibeman_clean_ledger_v7", false)
+
+            // Preserve any custom voice tags or manual cash entries before a clean v7 ledger rebuild
+            val existingAllTxs = dao.getAllTransactionsNow()
+            val savedCustomTagsBySmsKey = existingAllTxs
+                .filter { !it.isUntagged && it.rawSmsBody.isNotBlank() && it.purpose.isNotBlank() && it.purpose != "نیازمند تکمیل صوتی" }
+                .associateBy { "${it.bankName}|${it.totalAmountToman}|${it.timestamp}" }
+            val savedManualCashTxs = existingAllTxs.filter {
+                it.rawSmsBody.isBlank() &&
+                    it.bankName == "نقدی / دستی" &&
+                    !isBogusOrTestTransaction(it)
+            }
+
+            if (!cleanLedgerV7Done) {
+                prefs.edit().remove("jibeman_dedup_keys").apply()
+            }
+
             val importedKeys = prefs.getStringSet("jibeman_dedup_keys", emptySet())?.toMutableSet()
                 ?: mutableSetOf()
 
             var importedCount = 0
             var foundAnyRealBankSms = false
+            var wipedForV7Rebuild = false
 
             data class DiscoveredBankState(
                 val nameFa: String,
@@ -613,7 +643,6 @@ class OrosiFinanceRepository(
                     Telephony.Sms.BODY,
                     Telephony.Sms.DATE
                 )
-                // Remove 30-day cutoff: scan up to 3000 inbox messages ordered newest first
                 val sortOrder = "${Telephony.Sms.DATE} DESC LIMIT 3000"
 
                 val cursor = context.contentResolver.query(
@@ -643,10 +672,17 @@ class OrosiFinanceRepository(
                         if (senderAddress.isBlank() || body.isBlank()) continue
 
                         // Step 1: Resolve bank strictly from senderAddress via JibemanSmsEngine
-                        // Rejects Digikala, Tapsi, Snapp, and all promo SMS 100%
                         val bankProfile = JibemanSmsEngine.resolveBank(senderAddress) ?: continue
                         val bankName = bankProfile.nameFa
                         foundAnyRealBankSms = true
+
+                        if (!cleanLedgerV7Done && !wipedForV7Rebuild) {
+                            dao.clearAllTransactions()
+                            if (savedManualCashTxs.isNotEmpty()) {
+                                dao.insertTransactions(savedManualCashTxs)
+                            }
+                            wipedForV7Rebuild = true
+                        }
 
                         val bankState = discoveredBanks.getOrPut(bankName) {
                             DiscoveredBankState(
@@ -667,7 +703,6 @@ class OrosiFinanceRepository(
                         if (amountToman <= 0L) continue
                         val balanceToman = parsed.balance?.div(10L)
 
-                        // Record latest balance for this bank (cursor is DATE DESC, or check timestamp)
                         if (balanceToman != null && balanceToman >= 0L) {
                             if (bankState.latestBalanceToman == null || timestampMillis >= bankState.latestBalanceTimestamp) {
                                 bankState.latestBalanceToman = balanceToman
@@ -692,30 +727,23 @@ class OrosiFinanceRepository(
                             timestampMillis = timestampMillis
                         ) ?: continue
 
-                        if (fullResult.isMicroFee) {
-                            importedKeys.add(uniqueDedupKey)
-                            continue
-                        }
-
-                        val txType = when {
-                            fullResult.isSelfTransfer -> "SELF_TRANSFER"
-                            isDeposit -> "INCOME"
-                            else -> "EXPENSE"
-                        }
-                        val userShare = if (fullResult.isSelfTransfer) 0L else amountToman
+                        val txType = if (isDeposit) "INCOME" else "EXPENSE"
+                        val prevTagged = savedCustomTagsBySmsKey["$bankName|$amountToman|$timestampMillis"]
 
                         dao.insertTransaction(
                             TransactionEntity(
-                                title = fullResult.detectedTitle,
-                                storeName = fullResult.detectedStore,
-                                purpose = fullResult.detectedPurpose,
+                                title = prevTagged?.title ?: fullResult.detectedTitle,
+                                storeName = bankName,
+                                purpose = prevTagged?.purpose ?: fullResult.detectedPurpose,
                                 totalAmountToman = amountToman,
-                                userShareToman = userShare,
+                                userShareToman = prevTagged?.userShareToman ?: amountToman,
+                                dongAmountToman = prevTagged?.dongAmountToman ?: 0L,
+                                dongFriendName = prevTagged?.dongFriendName ?: "",
                                 weekdayDate = fullResult.weekdayDate,
                                 timeStr = fullResult.timeStr,
                                 cardInfo = fullResult.cardLabel,
                                 type = txType,
-                                isUntagged = fullResult.isUntaggedPurchase,
+                                isUntagged = prevTagged?.isUntagged ?: !isDeposit,
                                 timestamp = timestampMillis,
                                 balanceAfterToman = balanceToman,
                                 rawSmsBody = body,
@@ -732,9 +760,11 @@ class OrosiFinanceRepository(
             } catch (_: Exception) {
             }
 
-            // When real bank SMS exist on the phone, wipe demo transactions, demo commitments, and demo accounts
             if (foundAnyRealBankSms) {
-                prefs.edit().putBoolean("has_real_bank_sms", true).apply()
+                prefs.edit()
+                    .putBoolean("has_real_bank_sms", true)
+                    .putBoolean("jibeman_clean_ledger_v7", true)
+                    .apply()
                 if (!hadRealSmsBefore) {
                     dao.clearAllBankAccounts()
                 }

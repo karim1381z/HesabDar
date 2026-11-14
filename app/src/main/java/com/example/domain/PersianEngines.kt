@@ -124,6 +124,8 @@ data class JalaliDateTime(
 }
 
 object JalaliCalendarUtils {
+    private val tehranTimeZone: TimeZone = TimeZone.getTimeZone("Asia/Tehran")
+
     private val persianMonths = arrayOf(
         "", "فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور",
         "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"
@@ -131,13 +133,25 @@ object JalaliCalendarUtils {
 
     fun monthNameOf(month: Int): String = persianMonths.getOrElse(month.coerceIn(1, 12)) { "آبان" }
 
+    fun isJalaliLeapYear(jy: Int): Boolean {
+        val mod = ((jy + 12) % 33 + 33) % 33
+        return mod in setOf(1, 5, 9, 13, 17, 22, 26, 30)
+    }
+
+    fun daysInJalaliMonth(jy: Int, jm: Int): Int = when {
+        jm in 1..6 -> 31
+        jm in 7..11 -> 30
+        jm == 12 -> if (isJalaliLeapYear(jy)) 30 else 29
+        else -> 30
+    }
+
     fun fromTimestamp(timestampMillis: Long): JalaliDateTime {
         val effectiveMillis = if (timestampMillis > 946684800000L) {
             timestampMillis
         } else {
             System.currentTimeMillis()
         }
-        val cal = Calendar.getInstance(TimeZone.getTimeZone("Asia/Tehran"), Locale.US).apply {
+        val cal = Calendar.getInstance(tehranTimeZone, Locale.US).apply {
             timeInMillis = effectiveMillis
         }
         val gy = cal.get(Calendar.YEAR)
@@ -172,10 +186,24 @@ object JalaliCalendarUtils {
         )
     }
 
+    /**
+     * Exact standard mathematical Gregorian-to-Jalali calendar conversion algorithm:
+     * - Accounts for exact Gregorian leap years (4, 100, 400) and Jalali 33-year / 4-year cycles.
+     * - First 6 months (Farvardin..Shahrivar) = 31 days (186 days total).
+     * - Next 5 months (Mehr..Bahman) = 30 days.
+     * - Esfand = 29 or 30 days in leap years.
+     */
     fun gregorianToJalali(gy: Int, gm: Int, gd: Int): Triple<Int, Int, Int> {
         val gDaysInMonth = intArrayOf(0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334)
         val gy2 = if (gm > 2) gy + 1 else gy
-        var days = 355666 + (365 * gy) + ((gy2 + 3) / 4) - ((gy2 + 99) / 100) + ((gy2 + 399) / 400) + gd + gDaysInMonth[(gm - 1).coerceIn(0, 11)]
+        var days = 355666 +
+            (365 * gy) +
+            ((gy2 + 3) / 4) -
+            ((gy2 + 99) / 100) +
+            ((gy2 + 399) / 400) +
+            gd +
+            gDaysInMonth[(gm - 1).coerceIn(0, 11)]
+
         var jy = -1595 + (33 * (days / 12053))
         days %= 12053
         jy += 4 * (days / 1461)
@@ -198,12 +226,13 @@ object JalaliCalendarUtils {
 
     fun calculateRemainingDaysToPayday(paydayStartDay: Int, nowMillis: Long = System.currentTimeMillis()): Int {
         val jalali = fromTimestamp(nowMillis)
+        val monthLength = daysInJalaliMonth(jalali.year, jalali.month)
         val currentDay = jalali.day
-        val targetDay = paydayStartDay.coerceIn(1, 30)
+        val targetDay = paydayStartDay.coerceIn(1, monthLength)
         return when {
-            currentDay < targetDay -> (targetDay - currentDay).coerceIn(1, 30)
-            currentDay > targetDay -> (30 - currentDay + targetDay).coerceIn(1, 30)
-            else -> 30
+            currentDay < targetDay -> (targetDay - currentDay).coerceIn(1, 31)
+            currentDay > targetDay -> (monthLength - currentDay + targetDay).coerceIn(1, 31)
+            else -> monthLength
         }
     }
 }
@@ -899,6 +928,7 @@ object PersianVoiceSlangParserEngine {
         "هایپراستار" to "هایپراستار",
         "شهروند" to "فروشگاه شهروند",
         "نانوایی" to "نانوایی",
+        "نونوایی" to "نونوایی",
         "داروخانه" to "داروخانه",
         "سوپرمارکت" to "سوپرمارکت",
         "کافه لمیز" to "کافه لمیز",
@@ -925,9 +955,9 @@ object PersianVoiceSlangParserEngine {
      * Parses spoken Persian numbers and digits into Tomans:
      * - Supports Persian number words: یک/یه, دو, سه, چهار, پنج, شش, هفت, هشت, نه, ده, بیست, سی, چهل,
      *   پنجاه, شصت, هفتاد, هشتاد, نود, صد, دویست, سیصد, چهارصد, پانصد/پونصد, هزار, میلیون.
-     * - In everyday Iranian speech, if someone says "۵۰ تومن" or "۳۰۰ تومن" or "پنجاه تومن"
+     * - In everyday Iranian speech, if someone says "۵۰ تومن" or "۳۹ تومن" or "۷۰ تومن" or "پنجاه تومن"
      *   (a number between 1 and 999 followed by تومن/تومان/تا without هزار or میلیون),
-     *   treats it as thousands of Tomans (* 1,000L, e.g. "۵۰ تومن" = 50,000 Tomans).
+     *   treats it as thousands of Tomans (* 1,000L, e.g. "۳۹ تومن" = 39,000 Tomans, "۷۰ تومن" = 70,000 Tomans).
      */
     fun parseSpokenPersianAmountToman(rawText: String): Long {
         val cleaned = PersianNumberUtils.normalizePersianText(rawText.trim())
@@ -939,24 +969,24 @@ object PersianVoiceSlangParserEngine {
 
         val engText = PersianNumberUtils.toEnglishDigits(cleaned)
 
-        // 1. Check numeric digits first: e.g. "50 تومن", "300 هزار تومان", "2 میلیون"
-        val digitRegex = Regex("""([0-9]+(?:\.[0-9]+)?)\s*(میلیارد|میلیون|ملیون|هزار|تومان|تومن|تا)?""")
+        // 1. Check numeric digits first: e.g. "39 تومن", "70 تومن", "300 هزار تومان", "2 میلیون"
+        val digitRegex = Regex("""([0-9]+(?:\.[0-9]+)?)\s*(میلیارد|میلیون|ملیون|هزار\s*تومان|هزار\s*تومن|هزار|تومان|تومن|تا)?""")
         val digitMatch = digitRegex.find(engText)
         if (digitMatch != null) {
             val numVal = digitMatch.groupValues[1].toDoubleOrNull() ?: 0.0
-            val unit = digitMatch.groupValues[2]
+            val unit = digitMatch.groupValues[2].trim()
             if (numVal > 0.0) {
                 return when {
                     unit == "میلیارد" -> (numVal * 1_000_000_000.0).toLong()
                     unit == "میلیون" || unit == "ملیون" -> (numVal * 1_000_000.0).toLong()
-                    unit == "هزار" -> (numVal * 1_000.0).toLong()
+                    unit.startsWith("هزار") -> (numVal * 1_000.0).toLong()
                     numVal in 1.0..999.0 -> (numVal * 1_000.0).toLong()
                     else -> numVal.toLong()
                 }
             }
         }
 
-        // 2. Parse spoken Persian number words: e.g. "پانصد هزار تومان", "پنجاه تومن", "یک میلیون و دویست", "ده تومن"
+        // 2. Parse spoken Persian number words: e.g. "پانصد هزار تومان", "پنجاه تومن", "هفتاد تومن", "سی و نه تومن"
         val tokens = cleaned
             .replace("،", " ")
             .replace(".", " ")
@@ -972,7 +1002,6 @@ object PersianVoiceSlangParserEngine {
             val token = rawToken.trim()
             if (token == "و") continue
 
-            // Check if token has attached suffix like "تومنش" or "تومن"
             val cleanWord = token
                 .removeSuffix("تومنش")
                 .removeSuffix("تومانش")
@@ -1023,7 +1052,6 @@ object PersianVoiceSlangParserEngine {
             totalAccumulated += if (!hasExplicitMultiplier && currentGroup in 1L..999L) {
                 currentGroup * 1_000L
             } else if (hasExplicitMultiplier && totalAccumulated >= 1_000_000L && currentGroup in 1L..999L) {
-                // e.g. "یک میلیون و دویست" -> 1,000,000 + 200,000
                 currentGroup * 1_000L
             } else {
                 currentGroup
@@ -1037,9 +1065,8 @@ object PersianVoiceSlangParserEngine {
      * Exact Voice Command Parser (`parseVoiceCommand`):
      * - Distinguishes between tagging an existing bank SMS (`fallbackTotalToman != null`) vs
      *   creating a new manual cash/voice transaction (`fallbackTotalToman == null`).
-     * - Strips conversational filler words (`خریدم`, `گرفتم`, `دادم`, `پرداخت کردم`, `زدم`, `شد`, `بابت`).
-     * - NEVER falls back to `"اسنپ‌مارکت"` or `"خرید روزمره"`!
-     * - For manual voice transactions (`defaultBankName` blank or `"نقدی / دستی"`), labels `storeName = "نقدی / دستی"`.
+     * - Parses "۳۹ تومن نونوایی" -> amountToman = 39_000L, purposeCategory = "نونوایی"
+     * - Parses "۷۰ تومن نانوایی" -> amountToman = 70_000L, purposeCategory = "نانوایی"
      */
     fun parseVoiceCommand(
         rawSpeech: String,
@@ -1047,7 +1074,6 @@ object PersianVoiceSlangParserEngine {
         defaultBankName: String = "نقدی / دستی"
     ): ParsedVoiceExpense {
         val cleaned = PersianNumberUtils.normalizePersianText(rawSpeech.trim())
-        val engText = PersianNumberUtils.toEnglishDigits(cleaned)
         val isTaggingExistingSms = fallbackTotalToman != null && fallbackTotalToman > 0L
 
         val speechBeforeDong = if (cleaned.contains("که") && (cleaned.contains("دنگ") || cleaned.contains("دُنگ") || cleaned.contains("سهم"))) {
@@ -1108,16 +1134,19 @@ object PersianVoiceSlangParserEngine {
             exactPhraseAmounts.forEach { (phrase, _) ->
                 corePhrase = corePhrase.replace(phrase, " ")
             }
-            corePhrase = corePhrase
-                .replace(Regex("""[۰-۹0-9]+\s*(?:میلیارد|میلیون|ملیون|هزار)?\s*(?:تومان|تومن|تا)?"""), " ")
-            // Also strip leading/standalone spoken number words followed by هزار/میلیون/تومن/تومان
-            val numberWordsPattern = numberWordTokens.keys.joinToString("|")
+            // Strip numeric digits + optional commas + optional هزار/میلیون + optional تومان/تومن
             corePhrase = corePhrase.replace(
-                Regex("""(?:(?:$numberWordsPattern)(?:\s+و\s+(?:$numberWordsPattern))*\s*(?:میلیارد|میلیون|ملیون|هزار)?\s*(?:تومان|تومن|تا))"""),
+                Regex("""[۰-۹0-9][۰-۹0-9,٬،]*\s*(?:میلیارد|میلیون|ملیون|هزار)?\s*(?:تومان|تومن|تا)?"""),
+                " "
+            )
+            // Strip spoken number words followed by هزار/میلیون/تومن/تومان
+            val numberWordsPattern = numberWordTokens.keys.sortedByDescending { it.length }.joinToString("|")
+            corePhrase = corePhrase.replace(
+                Regex("""(?<=^|\s)(?:(?:$numberWordsPattern)(?:\s+و\s+(?:$numberWordsPattern))*)\s*(?:میلیارد|میلیون|ملیون|هزار)?\s*(?:تومان|تومن|تا)(?=\s|$)"""),
                 " "
             )
             corePhrase = corePhrase.replace(
-                Regex("""^(?:$numberWordsPattern)(?:\s+و\s+(?:$numberWordsPattern))*\s+(?:میلیارد|میلیون|ملیون|هزار)\b"""),
+                Regex("""(?<=^|\s)(?:(?:$numberWordsPattern)(?:\s+و\s+(?:$numberWordsPattern))*)\s+(?:میلیارد|میلیون|ملیون|هزار)(?=\s|$)"""),
                 " "
             )
         }
@@ -1136,8 +1165,8 @@ object PersianVoiceSlangParserEngine {
             var leftPart = explicitMatch.groupValues[1].trim()
             var rightStore = explicitMatch.groupValues[2].trim()
             conversationalFillers.forEach { filler ->
-                leftPart = leftPart.replace(Regex("""\b$filler\b"""), " ").trim()
-                rightStore = rightStore.replace(Regex("""\b$filler\b"""), " ").trim()
+                leftPart = leftPart.replace(Regex("""(?<=^|\s)$filler(?=\s|$)"""), " ").trim()
+                rightStore = rightStore.replace(Regex("""(?<=^|\s)$filler(?=\s|$)"""), " ").trim()
             }
             val matchedKnownStore = knownBrandsAndStores.firstOrNull { rightStore.contains(it.first) }?.second
                 ?: rightStore.ifBlank { effectiveBankName }
@@ -1150,10 +1179,10 @@ object PersianVoiceSlangParserEngine {
         } else {
             var stripped = corePhrase
             for (filler in conversationalFillers) {
-                stripped = stripped.replace(filler, " ")
+                stripped = stripped.replace(Regex("""(?<=^|\s)$filler(?=\s|$)"""), " ")
             }
             stripped = stripped
-                .replace(Regex("""\b(?:تومان|تومن)\b"""), " ")
+                .replace(Regex("""(?<=^|\s)(?:تومان|تومن|هزار|میلیون)(?=\s|$)"""), " ")
                 .replace(Regex("""\s+"""), " ")
                 .trim()
 
@@ -1163,7 +1192,13 @@ object PersianVoiceSlangParserEngine {
             } else {
                 detectedBrand ?: effectiveBankName
             }
-            purposeCategory = stripped.ifBlank { cleaned }
+            purposeCategory = if (stripped.isNotBlank()) {
+                stripped
+            } else if (isTaggingExistingSms) {
+                cleaned
+            } else {
+                ""
+            }
         }
 
         val safeDongAmount = dongAmount.coerceIn(0L, totalToman)

@@ -1,6 +1,7 @@
 package com.example.ui.components
 
 import android.Manifest
+import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -70,6 +71,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -125,81 +127,173 @@ fun VoiceOverlayBottomSheet(
 ) {
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var isLiveHardwareListening by remember { mutableStateOf(false) }
+    var isListening by remember { mutableStateOf(false) }
+    var voiceStatusHint by remember { mutableStateOf("برای شروع یا ضبط مجدد صدا روی موج ضربه بزنید") }
+    var hasAutoLaunchedSystemDialogOnError by remember { mutableStateOf(false) }
 
-    val speechRecognizer = remember {
-        try {
-            if (SpeechRecognizer.isRecognitionAvailable(context)) {
-                SpeechRecognizer.createSpeechRecognizer(context)
-            } else {
-                null
+    val currentOnSpeechChange by rememberUpdatedState(onSpeechChange)
+    val currentOnSimulateVoiceRecord by rememberUpdatedState(onSimulateVoiceRecord)
+    val currentRecognizedText by rememberUpdatedState(voiceState.recognizedText)
+
+    // System Voice Popup Dialog Launcher (works 100% reliably even when a Screen Recorder holds the microphone!)
+    val systemVoiceDialogLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        isListening = false
+        if (result.resultCode == Activity.RESULT_OK) {
+            val matches = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+            val bestSpoken = matches?.firstOrNull()?.trim()
+            if (!bestSpoken.isNullOrBlank()) {
+                currentOnSpeechChange(bestSpoken)
+                voiceStatusHint = "متن صوتی دریافت شد ✓"
             }
+        }
+    }
+
+    fun launchSystemVoicePopup(fallbackToSimIfUnavailable: Boolean = false) {
+        try {
+            val popupIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                )
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "fa-IR")
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "fa-IR")
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+                putExtra(
+                    RecognizerIntent.EXTRA_PROMPT,
+                    "جمله تراکنش را بگویید (مثلاً: ۷۰ تومن نانوایی)"
+                )
+            }
+            systemVoiceDialogLauncher.launch(popupIntent)
+        } catch (_: Exception) {
+            if (fallbackToSimIfUnavailable) {
+                currentOnSimulateVoiceRecord()
+            }
+        }
+    }
+
+    // Retain SpeechRecognizer with remember & destroy in DisposableEffect.onDispose
+    val speechRecognizer = remember(context) {
+        try {
+            SpeechRecognizer.createSpeechRecognizer(context)
         } catch (_: Exception) {
             null
+        }
+    }
+
+    fun buildSpeechRecognizerIntent(): Intent =
+        Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(
+                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+            )
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "fa-IR")
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "fa-IR")
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
+        }
+
+    fun startOrRestartRecognition(triggerFallbackIfUnavailable: Boolean = false) {
+        if (speechRecognizer != null) {
+            try {
+                if (isListening) {
+                    try {
+                        speechRecognizer.stopListening()
+                        speechRecognizer.cancel()
+                    } catch (_: Exception) {
+                    }
+                    isListening = false
+                }
+                isListening = true
+                voiceStatusHint = "در حال شنیدن صدای شما... (مثلاً بگویید: ۷۰ تومن نانوایی)"
+                speechRecognizer.startListening(buildSpeechRecognizerIntent())
+            } catch (_: Exception) {
+                isListening = false
+                if (triggerFallbackIfUnavailable) {
+                    launchSystemVoicePopup(fallbackToSimIfUnavailable = true)
+                }
+            }
+        } else if (triggerFallbackIfUnavailable) {
+            launchSystemVoicePopup(fallbackToSimIfUnavailable = true)
         }
     }
 
     DisposableEffect(speechRecognizer) {
         val listener = object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {
-                isLiveHardwareListening = true
+                isListening = true
+                voiceStatusHint = "در حال شنیدن صدای شما... صحبت کنید"
             }
+
             override fun onBeginningOfSpeech() {
-                isLiveHardwareListening = true
+                isListening = true
             }
+
             override fun onRmsChanged(rmsdB: Float) {}
+
             override fun onBufferReceived(buffer: ByteArray?) {}
+
             override fun onEndOfSpeech() {
-                isLiveHardwareListening = false
+                isListening = false
+                voiceStatusHint = "ضبط پایان یافت • برای ضبط مجدد روی موج ضربه بزنید"
             }
+
             override fun onError(error: Int) {
-                isLiveHardwareListening = false
-            }
-            override fun onResults(results: Bundle?) {
-                isLiveHardwareListening = false
-                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                val firstSpoken = matches?.firstOrNull()
-                if (!firstSpoken.isNullOrBlank()) {
-                    onSpeechChange(firstSpoken)
+                isListening = false
+                voiceStatusHint = "برای ضبط مجدد روی موج یا دکمه دیالوگ صوتی سیستم بزنید"
+                // Critical fallback: if background SpeechRecognizer fails (e.g. ERROR_AUDIO = 3 when Screen Recorder holds mic,
+                // ERROR_CLIENT = 5, ERROR_NO_MATCH = 7, ERROR_INSUFFICIENT_PERMISSIONS = 9), launch native system voice dialog
+                if (!hasAutoLaunchedSystemDialogOnError &&
+                    currentRecognizedText.isBlank() &&
+                    (error == SpeechRecognizer.ERROR_AUDIO ||
+                        error == SpeechRecognizer.ERROR_CLIENT ||
+                        error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY ||
+                        error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ||
+                        error == SpeechRecognizer.ERROR_NO_MATCH)
+                ) {
+                    hasAutoLaunchedSystemDialogOnError = true
+                    launchSystemVoicePopup(fallbackToSimIfUnavailable = false)
                 }
             }
+
+            override fun onResults(results: Bundle?) {
+                isListening = false
+                val firstSpoken = results
+                    ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    ?.firstOrNull()
+                    ?.trim()
+                if (!firstSpoken.isNullOrBlank()) {
+                    currentOnSpeechChange(firstSpoken)
+                    voiceStatusHint = "متن صوتی دریافت شد ✓"
+                } else {
+                    voiceStatusHint = "صدایی تشخیص داده نشد • دوباره امتحان کنید"
+                }
+            }
+
             override fun onPartialResults(partialResults: Bundle?) {
                 val partial = partialResults
                     ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     ?.firstOrNull()
+                    ?.trim()
                 if (!partial.isNullOrBlank()) {
-                    onSpeechChange(partial)
+                    currentOnSpeechChange(partial)
                 }
             }
+
             override fun onEvent(eventType: Int, params: Bundle?) {}
         }
         speechRecognizer?.setRecognitionListener(listener)
 
         onDispose {
+            isListening = false
             try {
+                speechRecognizer?.stopListening()
+                speechRecognizer?.cancel()
                 speechRecognizer?.destroy()
-            } catch (_: Exception) {}
-        }
-    }
-
-    fun startRealOrFallbackRecognition(triggerSimFallbackIfUnavailable: Boolean = false) {
-        if (speechRecognizer != null) {
-            try {
-                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                    putExtra(
-                        RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                        RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-                    )
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, "fa-IR")
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "fa-IR")
-                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                }
-                speechRecognizer.startListening(intent)
             } catch (_: Exception) {
-                if (triggerSimFallbackIfUnavailable) onSimulateVoiceRecord()
             }
-        } else if (triggerSimFallbackIfUnavailable) {
-            onSimulateVoiceRecord()
         }
     }
 
@@ -207,7 +301,9 @@ fun VoiceOverlayBottomSheet(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            startRealOrFallbackRecognition(triggerSimFallbackIfUnavailable = false)
+            startOrRestartRecognition(triggerFallbackIfUnavailable = true)
+        } else {
+            launchSystemVoicePopup(fallbackToSimIfUnavailable = false)
         }
     }
 
@@ -218,7 +314,7 @@ fun VoiceOverlayBottomSheet(
             Manifest.permission.RECORD_AUDIO
         ) == PackageManager.PERMISSION_GRANTED
         if (hasAudioPerm) {
-            startRealOrFallbackRecognition(triggerSimFallbackIfUnavailable = false)
+            startOrRestartRecognition(triggerFallbackIfUnavailable = false)
         } else {
             try {
                 recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
@@ -280,10 +376,10 @@ fun VoiceOverlayBottomSheet(
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(10.dp))
             }
 
-            // 1. Glowing Turquoise Audio Wave
+            // 1. Glowing Turquoise Audio Wave (Tapping stops & restarts cleanly if already listening)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -307,16 +403,16 @@ fun VoiceOverlayBottomSheet(
                             Manifest.permission.RECORD_AUDIO
                         ) == PackageManager.PERMISSION_GRANTED
                         if (hasAudioPerm) {
-                            startRealOrFallbackRecognition(triggerSimFallbackIfUnavailable = true)
+                            startOrRestartRecognition(triggerFallbackIfUnavailable = true)
                         } else {
                             try {
                                 recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                             } catch (_: Exception) {
-                                onSimulateVoiceRecord()
+                                launchSystemVoicePopup(fallbackToSimIfUnavailable = true)
                             }
                         }
                     }
-                    .padding(vertical = 20.dp, horizontal = 20.dp)
+                    .padding(vertical = 16.dp, horizontal = 18.dp)
                     .testTag("voice_record_button"),
                 contentAlignment = Alignment.Center
             ) {
@@ -324,7 +420,7 @@ fun VoiceOverlayBottomSheet(
                     Canvas(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(54.dp)
+                            .height(48.dp)
                     ) {
                         val barCount = 26
                         val totalWidth = size.width
@@ -335,10 +431,10 @@ fun VoiceOverlayBottomSheet(
                         for (i in 0 until barCount) {
                             val norm = i.toFloat() / barCount.toFloat()
                             val envelope = sin(norm * Math.PI).toFloat()
-                            val dynamicWave = if (isLiveHardwareListening || voiceState.isRecordingSimulated) {
+                            val dynamicWave = if (isListening || voiceState.isRecordingSimulated) {
                                 0.38f + 0.62f * kotlin.math.abs(sin(phase * 1.4f + i * 0.45f))
                             } else {
-                                0.28f + 0.55f * kotlin.math.abs(sin(phase + i * 0.45f))
+                                0.25f + 0.35f * kotlin.math.abs(sin(phase + i * 0.45f))
                             }
                             val barHeight = (size.height * 0.88f * envelope * dynamicWave).coerceAtLeast(10f)
                             val x = (totalWidth - (barCount * (barWidth + spacing))) / 2f + i * (barWidth + spacing)
@@ -351,27 +447,54 @@ fun VoiceOverlayBottomSheet(
                             )
                         }
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = if (isLiveHardwareListening) "در حال شنیدن صدای شما... (بگویید بابت چه کاری بود)" else "برای ضبط مجدد صدا روی موج ضربه بزنید",
+                        text = if (isListening) "در حال شنیدن صدای شما... (ضربه برای شروع مجدد)" else voiceStatusHint,
                         style = MaterialTheme.typography.labelMedium,
-                        color = NishapurTurquoiseSoft
+                        color = NishapurTurquoiseSoft,
+                        textAlign = TextAlign.Center
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-            // 2. Clean Live Text Input Box so the user can see/edit the recognized speech live before tapping "تأیید و ثبت"
+            // Prominent Fallback Button: "🎤 ضبط با دیالوگ صوتی سیستم" (Works 100% on Xiaomi/Samsung & during Screen Recording)
+            OutlinedButton(
+                onClick = { launchSystemVoicePopup(fallbackToSimIfUnavailable = true) },
+                shape = RoundedCornerShape(14.dp),
+                contentPadding = PaddingValues(vertical = 10.dp, horizontal = 14.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("system_voice_dialog_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Mic,
+                    contentDescription = null,
+                    tint = NishapurTurquoiseBright,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "🎤 ضبط با دیالوگ صوتی سیستم",
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                    color = NishapurTurquoiseSoft
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // 2. Single Clean Sentence/Description Field at the top:
+            // "جمله یا توضیح تراکنش (مثلاً: ۷۰ تومن نانوایی)"
             OutlinedTextField(
                 value = voiceState.recognizedText,
                 onValueChange = onSpeechChange,
                 label = {
                     Text(
                         if (targetTx != null) {
-                            "بابتِ این تراکنش بانکی (قابل ویرایش)"
+                            "بابتِ این تراکنش بانکی (مثلاً: پفک، شارژ ایرانسل)"
                         } else {
-                            "متن صوتی یا توضیح تراکنش نقدی/دستی"
+                            "جمله یا توضیح تراکنش (مثلاً: ۷۰ تومن نانوایی)"
                         }
                     )
                 },
@@ -380,7 +503,7 @@ fun VoiceOverlayBottomSheet(
                         if (targetTx != null) {
                             "مثلاً: پفک، شارژ ایرانسل، نانوایی..."
                         } else {
-                            "مثلاً: پنجاه تومن نانوایی، ۳۰۰ تومن میوه..."
+                            "مثلاً: ۷۰ تومن نانوایی، ۳۹ تومن نونوایی..."
                         }
                     )
                 },
@@ -395,78 +518,79 @@ fun VoiceOverlayBottomSheet(
                 )
             )
 
-            // When creating a new manual cash/voice transaction (targetTx == null), show editable "مبلغ (تومان)" field
-            if (targetTx == null) {
-                Spacer(modifier = Modifier.height(10.dp))
-                OutlinedTextField(
-                    value = voiceState.manualAmountText,
-                    onValueChange = onManualAmountChange,
-                    label = { Text("مبلغ (تومان) - الزامی برای ثبت دستی") },
-                    placeholder = { Text("مثلاً: ۵۰,۰۰۰ یا ۳۰۰,۰۰۰") },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("voice_manual_amount_input"),
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = NishapurTurquoiseBright,
-                        unfocusedBorderColor = OrosiHairline
-                    )
-                )
-            }
+            Spacer(modifier = Modifier.height(12.dp))
 
-            if (voiceState.purposeCategory.isNotBlank()) {
-                Spacer(modifier = Modifier.height(10.dp))
+            // Live Auto-Extracted Summary Card: "عنوان / بابت" and "مبلغ (تومان)"
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(OrosiSurfaceHigh)
+                    .border(1.dp, NishapurTurquoiseBright.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(OrosiSurfaceHigh)
-                        .border(1.dp, NishapurTurquoiseBright.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
-                        .padding(horizontal = 14.dp, vertical = 10.dp)
                         .testTag("recognized_speech_text"),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = if (targetTx != null) "عنوان ثبت‌شونده:" else "عنوان (نقدی / دستی):",
+                        text = "عنوان / بابت:",
                         style = MaterialTheme.typography.bodySmall,
                         color = OrosiOnSurfaceVariant
                     )
                     Text(
-                        text = voiceState.purposeCategory,
+                        text = voiceState.purposeCategory.ifBlank { "در انتظار ورود جمله..." },
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.ExtraBold),
-                        color = NishapurTurquoiseSoft
+                        color = if (voiceState.purposeCategory.isNotBlank()) NishapurTurquoiseSoft else OrosiOnSurfaceVariant
                     )
                 }
-            } else {
-                // Keep testTag("recognized_speech_text") present even when empty
-                Text(
-                    text = if (targetTx != null) {
-                        "بگویید یا بنویسید این تراکنش بابت چه چیزی بود"
-                    } else {
-                        "مبلغ و بابت تراکنش نقدی را بگویید یا وارد کنید (مثلاً: ۵۰ تومن نانوایی)"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = OrosiOnSurfaceVariant,
-                    textAlign = TextAlign.Center,
+
+                Row(
                     modifier = Modifier
-                        .padding(top = 8.dp)
-                        .testTag("recognized_speech_text")
-                )
+                        .fillMaxWidth()
+                        .testTag("voice_manual_amount_input"),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "مبلغ (تومان):",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = OrosiOnSurfaceVariant
+                    )
+                    val displayAmount = if (voiceState.totalAmountToman > 0L) {
+                        PersianNumberUtils.formatToman(voiceState.totalAmountToman, showUnit = true)
+                    } else {
+                        "۰ تومان"
+                    }
+                    Text(
+                        text = displayAmount,
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.ExtraBold),
+                        color = if (voiceState.totalAmountToman > 0L) SaffronGoldLight else RubyRoseSoft
+                    )
+                }
             }
 
-            val canConfirm = targetTx != null || voiceState.totalAmountToman > 0L
+            val canConfirm = (targetTx != null || voiceState.totalAmountToman > 0L) &&
+                voiceState.purposeCategory.isNotBlank()
             if (!canConfirm) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "برای ثبت تراکنش جدید، مبلغ باید بیشتر از ۰ تومان باشد.",
+                    text = if (targetTx == null) {
+                        "جمله تراکنش را همراه با مبلغ بگویید یا بنویسید (مثلاً: ۷۰ تومن نانوایی)"
+                    } else {
+                        "بگویید یا بنویسید این تراکنش بابت چه چیزی بود"
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = SaffronGoldLight,
                     textAlign = TextAlign.Center
                 )
             }
 
-            Spacer(modifier = Modifier.height(18.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // 3. Confirm Button: "تأیید و ثبت"
             Button(

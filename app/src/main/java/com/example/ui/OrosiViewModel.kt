@@ -82,6 +82,7 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
     private val _selectedYearMonthKey = MutableStateFlow(
         JalaliCalendarUtils.fromTimestamp(System.currentTimeMillis()).yearMonthKey
     )
+    private var hasUserChangedMonthManually = false
     private val _voiceState = MutableStateFlow(VoiceUiState())
     private val _selectedTransactionForDetail = MutableStateFlow<TransactionEntity?>(null)
     private val _selectedCommitmentForAction = MutableStateFlow<CommitmentEntity?>(null)
@@ -97,6 +98,24 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
     init {
         viewModelScope.launch {
             repository.ensureSeeded()
+            syncInitialSelectedMonthWithTransactions()
+        }
+    }
+
+    private suspend fun syncInitialSelectedMonthWithTransactions() {
+        if (hasUserChangedMonthManually) return
+        val nowKey = JalaliCalendarUtils.fromTimestamp(System.currentTimeMillis()).yearMonthKey
+        val allTxs = dao.getAllTransactionsNow().filter { it.totalAmountToman > 0L }
+        val hasCurrentMonthTxs = allTxs.any {
+            JalaliCalendarUtils.fromTimestamp(it.timestamp).yearMonthKey == nowKey
+        }
+        if (hasCurrentMonthTxs || allTxs.isEmpty()) {
+            _selectedYearMonthKey.value = nowKey
+        } else {
+            val newestTxKey = allTxs.maxByOrNull { it.timestamp }?.let {
+                JalaliCalendarUtils.fromTimestamp(it.timestamp).yearMonthKey
+            } ?: nowKey
+            _selectedYearMonthKey.value = newestTxKey
         }
     }
 
@@ -184,6 +203,7 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun changeSelectedMonth(deltaMonths: Int) {
+        hasUserChangedMonthManually = true
         val currentRealYearMonthKey = JalaliCalendarUtils.fromTimestamp(System.currentTimeMillis()).yearMonthKey
         val current = _selectedYearMonthKey.value
         if (deltaMonths > 0 && current >= currentRealYearMonthKey) {
@@ -399,11 +419,13 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
         val targetTx = _voiceState.value.targetUntaggedTransaction
         if (targetTx != null) return // Existing bank SMS amount is locked
         val formattedPersian = PersianNumberUtils.toPersianDigits(newAmountStr)
-        val numericVal = PersianNumberUtils.toEnglishDigits(formattedPersian)
+        val directDigits = PersianNumberUtils.toEnglishDigits(formattedPersian)
             .replace(",", "")
             .replace("٬", "")
             .trim()
-            .toLongOrNull() ?: 0L
+            .toLongOrNull()
+        val numericVal = directDigits
+            ?: PersianVoiceSlangParserEngine.parseSpokenPersianAmountToman(newAmountStr)
         val safeDong = _voiceState.value.dongAmountToman.coerceIn(0L, numericVal)
         val userShare = (numericVal - safeDong).coerceAtLeast(0L)
         _voiceState.value = _voiceState.value.copy(
@@ -429,11 +451,13 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
         val effectiveTotal = when {
             targetTx != null -> targetTx.totalAmountToman
             parsed.totalAmountToman > 0L -> parsed.totalAmountToman
+            speech.isBlank() -> 0L
             else -> currentManualTyped
         }
         val effectiveManualText = when {
             targetTx != null -> PersianNumberUtils.formatToman(targetTx.totalAmountToman)
             parsed.totalAmountToman > 0L -> PersianNumberUtils.formatToman(parsed.totalAmountToman)
+            speech.isBlank() -> ""
             else -> _voiceState.value.manualAmountText
         }
         val safeDong = parsed.dongAmountToman.coerceIn(0L, effectiveTotal)
@@ -455,7 +479,7 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * Fallback voice simulation when running on a web emulator without a microphone.
-     * Uses realistic everyday phrases like "پفک خریدم", "شارژ ایرانسل", "پنجاه تومن نانوایی سنگک"
+     * Uses realistic everyday phrases like "پفک خریدم", "شارژ ایرانسل", "۷۰ تومن نانوایی"
      * and NEVER uses "اسنپ‌مارکت"!
      */
     fun triggerVoiceSimulation(samplePhrase: String? = null) {
@@ -469,7 +493,7 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
                 val phrase = when {
                     targetTx != null && targetTx.totalAmountToman == 49_500L -> "شارژ ایرانسل"
                     targetTx != null -> "پفک خریدم"
-                    else -> "پنجاه تومن نانوایی سنگک"
+                    else -> "۷۰ تومن نانوایی"
                 }
                 parseAndUpdateVoiceState(phrase, targetTx)
             }
@@ -485,7 +509,8 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
                 .replace(",", "")
                 .replace("٬", "")
                 .trim()
-                .toLongOrNull() ?: 0L
+                .toLongOrNull()
+                ?: PersianVoiceSlangParserEngine.parseSpokenPersianAmountToman(v.manualAmountText)
 
             val parsedFromSpeech = PersianVoiceSlangParserEngine.parseVoiceCommand(
                 rawSpeech = v.recognizedText,
@@ -495,12 +520,16 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
 
             val finalTotalAmount = when {
                 targetTx != null -> targetTx.totalAmountToman
-                typedManualAmount > 0L -> typedManualAmount
-                else -> parsedFromSpeech.totalAmountToman
+                parsedFromSpeech.totalAmountToman > 0L -> parsedFromSpeech.totalAmountToman
+                else -> typedManualAmount
             }
 
-            if (parsedFromSpeech.purposeCategory.isBlank()) {
-                showBanner("لطفاً توضیح تراکنش را بگویید یا بنویسید.")
+            val finalPurpose = parsedFromSpeech.purposeCategory
+                .ifBlank { v.purposeCategory }
+                .trim()
+
+            if (finalPurpose.isBlank()) {
+                showBanner("لطفاً توضیح تراکنش را بگویید یا بنویسید (مثلاً: ۷۰ تومن نانوایی).")
                 return@launch
             }
 
@@ -513,6 +542,7 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
             val finalUserShare = (finalTotalAmount - safeDong).coerceAtLeast(0L)
 
             val finalParsed = parsedFromSpeech.copy(
+                purposeCategory = finalPurpose,
                 totalAmountToman = finalTotalAmount,
                 dongAmountToman = safeDong,
                 userShareToman = finalUserShare,
