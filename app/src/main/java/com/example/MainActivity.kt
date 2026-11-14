@@ -1,7 +1,13 @@
 package com.example
 
 import android.Manifest
+import android.content.pm.PackageManager
+import android.database.ContentObserver
+import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.provider.Telephony
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -29,9 +35,9 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.EventNote
-import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Icon
@@ -43,13 +49,23 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.OrosiScreen
@@ -72,6 +88,7 @@ import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.NishapurTurquoise
 import com.example.ui.theme.NishapurTurquoiseBright
 import com.example.ui.theme.NishapurTurquoiseDeep
+import com.example.ui.theme.NishapurTurquoiseSoft
 import com.example.ui.theme.OrosiHairline
 import com.example.ui.theme.OrosiOnSurfaceVariant
 import com.example.ui.theme.OrosiSurface
@@ -102,23 +119,144 @@ fun OrosiFinanceApp(
     uiState: OrosiUiState,
     viewModel: OrosiViewModel
 ) {
-    // Request RECEIVE_SMS, READ_SMS, and RECORD_AUDIO permissions via RequestMultiplePermissions
-    val smsPermissionLauncher = rememberLauncherForActivityResult(
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    var hasSmsPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.READ_SMS
+            ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+
+    // 1. Automatic Zero-Click SMS Permission Launcher on First Launch
+    val autoSmsPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { _ ->
+    ) { result ->
+        val granted = result[Manifest.permission.READ_SMS] == true ||
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.READ_SMS
+            ) == PackageManager.PERMISSION_GRANTED
+        hasSmsPermission = granted
+        if (granted) {
+            viewModel.autoSyncSmsSilently()
+        }
+    }
+
+    val statusModalPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        val granted = result[Manifest.permission.READ_SMS] == true ||
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.READ_SMS
+            ) == PackageManager.PERMISSION_GRANTED
+        hasSmsPermission = granted
+        if (granted) {
+            viewModel.autoSyncSmsSilently()
+        }
         viewModel.setShowSmsSimulator(true)
     }
 
-    val smsScanPermissionLauncher = rememberLauncherForActivityResult(
+    val cleanRescanPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { _ ->
-        viewModel.scanDeviceSmsInboxLast30Days()
+        viewModel.cleanPurgeAndRescanRealSms()
     }
 
     val voicePermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { _ ->
         viewModel.openVoiceOverlayNew()
+    }
+
+    // Automatically request READ_SMS & RECEIVE_SMS on first launch and immediately sync
+    LaunchedEffect(Unit) {
+        val readGranted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.READ_SMS
+        ) == PackageManager.PERMISSION_GRANTED
+        val receiveGranted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECEIVE_SMS
+        ) == PackageManager.PERMISSION_GRANTED
+
+        hasSmsPermission = readGranted
+        if (readGranted && receiveGranted) {
+            viewModel.autoSyncSmsSilently()
+        } else {
+            try {
+                autoSmsPermissionLauncher.launch(
+                    arrayOf(
+                        Manifest.permission.READ_SMS,
+                        Manifest.permission.RECEIVE_SMS
+                    )
+                )
+            } catch (_: Exception) {
+                viewModel.autoSyncSmsSilently()
+            }
+        }
+    }
+
+    // 2. Automatically sync SMS on every Lifecycle.Event.ON_RESUME
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val readGranted = ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.READ_SMS
+                ) == PackageManager.PERMISSION_GRANTED
+                hasSmsPermission = readGranted
+                if (readGranted) {
+                    viewModel.autoSyncSmsSilently()
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    // 3. Live ContentObserver registered on Telephony.Sms.CONTENT_URI for instant zero-click background sync
+    DisposableEffect(context, hasSmsPermission) {
+        val smsObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) {
+                super.onChange(selfChange)
+                viewModel.autoSyncSmsSilently()
+            }
+
+            override fun onChange(selfChange: Boolean, uri: Uri?) {
+                super.onChange(selfChange, uri)
+                viewModel.autoSyncSmsSilently()
+            }
+        }
+
+        var registered = false
+        if (hasSmsPermission) {
+            try {
+                context.contentResolver.registerContentObserver(
+                    Telephony.Sms.CONTENT_URI,
+                    true,
+                    smsObserver
+                )
+                registered = true
+            } catch (_: SecurityException) {
+            } catch (_: Exception) {
+            }
+        }
+
+        onDispose {
+            if (registered) {
+                try {
+                    context.contentResolver.unregisterContentObserver(smsObserver)
+                } catch (_: Exception) {
+                }
+            }
+        }
     }
 
     val reservedCommitmentsToman = uiState.commitments
@@ -135,8 +273,8 @@ fun OrosiFinanceApp(
             OrosiTopHeader(
                 currentScreen = uiState.currentScreen,
                 onProfileClick = { viewModel.setShowPaydayBackupModal(true) },
-                onBellClick = {
-                    smsPermissionLauncher.launch(
+                onStatusClick = {
+                    statusModalPermissionLauncher.launch(
                         arrayOf(
                             Manifest.permission.RECEIVE_SMS,
                             Manifest.permission.READ_SMS
@@ -289,12 +427,11 @@ fun OrosiFinanceApp(
         )
     }
 
+    // Clean, Reassuring Automatic SMS Connection Status Modal
     if (uiState.showSmsSimulatorModal) {
         SmsSimulatorBottomSheet(
-            onPreviewSms = { viewModel.previewBankSms(it) },
-            onProcessSms = { viewModel.processBankSms(it) },
-            onScanDeviceInboxLast30Days = {
-                smsScanPermissionLauncher.launch(
+            onCleanPurgeAndRescanRealSms = {
+                cleanRescanPermissionLauncher.launch(
                     arrayOf(
                         Manifest.permission.READ_SMS,
                         Manifest.permission.RECEIVE_SMS
@@ -348,7 +485,7 @@ fun OrosiFinanceApp(
 private fun OrosiTopHeader(
     currentScreen: OrosiScreen,
     onProfileClick: () -> Unit,
-    onBellClick: () -> Unit
+    onStatusClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -392,22 +529,32 @@ private fun OrosiTopHeader(
             )
         }
 
-        // Left side (in RTL): Unclipped Notification Bell Button with generous margin
+        // Left side (in RTL): Clean, reassuring Automatic Bank SMS Status Pill
         Surface(
-            onClick = onBellClick,
-            shape = CircleShape,
-            color = OrosiSurfaceContainer,
+            onClick = onStatusClick,
+            shape = RoundedCornerShape(50),
+            color = NishapurTurquoiseDeep.copy(alpha = 0.85f),
             modifier = Modifier
-                .size(48.dp)
-                .border(1.dp, NishapurTurquoise.copy(alpha = 0.55f), CircleShape)
+                .border(1.dp, NishapurTurquoiseBright.copy(alpha = 0.7f), RoundedCornerShape(50))
                 .testTag("sms_simulator_button")
         ) {
-            Box(contentAlignment = Alignment.Center) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp)
+            ) {
                 Icon(
-                    imageVector = Icons.Default.NotificationsActive,
-                    contentDescription = "شبیه‌ساز پیامک بانکی",
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = "اتصال خودکار به پیامک همه بانکها: فعال ✓",
                     tint = NishapurTurquoiseBright,
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "اتصال خودکار بانکها ✓",
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                    color = NishapurTurquoiseSoft,
+                    maxLines = 1,
+                    softWrap = false
                 )
             }
         }

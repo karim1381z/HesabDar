@@ -355,15 +355,39 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Silent, 100% automatic zero-click background SMS sync triggered on app launch,
+     * permission grant, Lifecycle.Event.ON_RESUME, and ContentObserver on Telephony.Sms.CONTENT_URI.
+     */
+    fun autoSyncSmsSilently() {
+        viewModelScope.launch {
+            repository.scanDeviceSmsInboxLast30Days(appContext, daysBack = 60)
+        }
+    }
+
     fun scanDeviceSmsInboxLast30Days() {
         viewModelScope.launch {
-            val count = repository.scanDeviceSmsInboxLast30Days(appContext)
+            val count = repository.scanDeviceSmsInboxLast30Days(appContext, daysBack = 60)
+            _showSmsSimulatorModal.value = false
+            if (count > 0) {
+                val countStr = PersianNumberUtils.toPersianDigits(count.toString())
+                showBanner("$countStr پیامک بانکی جدید به‌صورت خودکار همگام‌سازی شد.")
+            }
+        }
+    }
+
+    /**
+     * Triggered when the user taps "پاکسازی و بازخوانی تمیز پیامک‌های واقعی" in the status modal.
+     */
+    fun cleanPurgeAndRescanRealSms() {
+        viewModelScope.launch {
+            val count = repository.cleanPurgeAndRescanRealSms(appContext)
             _showSmsSimulatorModal.value = false
             val countStr = PersianNumberUtils.toPersianDigits(count.toString())
             if (count > 0) {
-                showBanner("$countStr پیامک بانکی جدید از ۳۰ روز اخیر اسکن و به تراکنش‌ها اضافه شد.")
+                showBanner("پاکسازی انجام شد و $countStr پیامک واقعی بانک با تاریخ و مبلغ دقیق بازخوانی شد ✓")
             } else {
-                showBanner("تمامی پیامک‌های بانکی ۳۰ روز اخیر قبلاً ثبت شده‌اند (تکراری وجود ندارد).")
+                showBanner("پاکسازی و بازخوانی تمیز پیامک‌های بانکی انجام شد ✓")
             }
         }
     }

@@ -85,6 +85,7 @@ import androidx.core.content.ContextCompat
 import com.example.data.local.AppSettingsEntity
 import com.example.data.local.CommitmentEntity
 import com.example.data.local.TransactionEntity
+import com.example.domain.JalaliCalendarUtils
 import com.example.domain.ParsedSmsResult
 import com.example.domain.PersianNumberUtils
 import com.example.ui.VoiceUiState
@@ -880,7 +881,10 @@ fun TransactionDetailAndEditBottomSheet(
     }
     var weekdayDateStr by remember(transaction) {
         val base = transaction.weekdayDate
-        mutableStateOf(if (base.contains("۱۴۰")) base else "$base ۱۴۰۵")
+        val jalaliYearStr = PersianNumberUtils.toPersianDigits(
+            JalaliCalendarUtils.fromTimestamp(transaction.timestamp).year.toString()
+        )
+        mutableStateOf(if (base.contains("۱۴۰")) base else "$base $jalaliYearStr")
     }
     var timeStr by remember(transaction) { mutableStateOf(transaction.timeStr) }
     var cardInfoStr by remember(transaction) { mutableStateOf(transaction.cardInfo) }
@@ -1124,7 +1128,9 @@ fun TransactionDetailAndEditBottomSheet(
                 onClick = {
                     val parsedAmount = PersianNumberUtils.toEnglishDigits(amountStr).toLongOrNull()
                         ?: transaction.totalAmountToman
-                    val cleanWeekdayDate = weekdayDateStr.replace("۱۴۰۵", "").replace("۱۴۰۳", "").trim()
+                    val cleanWeekdayDate = weekdayDateStr
+                        .replace(Regex("۱۴۰[۰-۹]"), "")
+                        .trim()
                         .ifEmpty { transaction.weekdayDate }
                     onSaveEdits(
                         parsedAmount,
@@ -1158,50 +1164,12 @@ fun TransactionDetailAndEditBottomSheet(
     }
 }
 
-data class BankSmsSample(
-    val label: String,
-    val smsText: String
-)
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SmsSimulatorBottomSheet(
-    onPreviewSms: (String) -> ParsedSmsResult,
-    onProcessSms: (String) -> Unit,
-    onScanDeviceInboxLast30Days: () -> Unit,
+    onCleanPurgeAndRescanRealSms: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    val samples = remember {
-        listOf(
-            BankSmsSample(
-                label = "بلوبانک (خرید بی‌نام)",
-                smsText = "بلوبانک\nبرداشت: ۲,۴۰۰,۰۰۰ ریال\nکارت: ۶۲۱۹\nجمعه ۱ آبان ۱۸:۱۰"
-            ),
-            BankSmsSample(
-                label = "بانک ملت (خرید کارتی)",
-                smsText = "بانک ملت\nبرداشت مبلغ ۱,۸۵۰,۰۰۰ ریال\nکارت ۸۴۱۲\nجمعه ۱۴۰۳/۰۸/۰۱-۱۹:۲۰"
-            ),
-            BankSmsSample(
-                label = "بانک ملی (خرید روزمره)",
-                smsText = "بانک ملی ایران\nخرید کارتی: ۳,۲۰۰,۰۰۰ ریال\nکارت: ۵۰۴۱\nپنجشنبه ۳۰ مهر ۲۰:۴۵"
-            ),
-            BankSmsSample(
-                label = "بانک سامان (واریز حقوق)",
-                smsText = "بانک سامان\nواریز پایا حقوق: ۳۸۰,۰۰۰,۰۰۰ ریال\nکارت: ۷۳۹۰\nجمعه ۱ آبان ۰۸:۳۰"
-            ),
-            BankSmsSample(
-                label = "بانک رسالت (انتقال خودی)",
-                smsText = "بانک قرض‌الحسنه رسالت\nانتقال به کارت خود ۶۲۱۹ از کارت ۱۱۸۴\nمبلغ: ۱۵,۰۰۰,۰۰۰ ریال\nجمعه ۱ آبان ۱۷:۱۵"
-            ),
-            BankSmsSample(
-                label = "کارمزد خرد (فیلتر خودکار)",
-                smsText = "بلوبانک\nبرداشت کارمزد پیامک: ۱۲,۰۰۰ ریال\nکارت ۶۲۱۹\nجمعه ۱ آبان ۱۲:۰۰"
-            )
-        )
-    }
-
-    var rawSmsText by remember { mutableStateOf(samples.first().smsText) }
-    val preview = remember(rawSmsText) { onPreviewSms(rawSmsText) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
@@ -1214,26 +1182,30 @@ fun SmsSimulatorBottomSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 28.dp)
-                .testTag("sms_simulator_sheet")
+                .padding(horizontal = 22.dp)
+                .padding(bottom = 30.dp)
+                .testTag("sms_simulator_sheet"),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
                     Icon(
-                        imageVector = Icons.Default.Sms,
+                        imageVector = Icons.Default.CheckCircle,
                         contentDescription = null,
                         tint = NishapurTurquoiseBright,
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(24.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "اسکنر و شبیه‌ساز پیامک بانکی",
-                        style = MaterialTheme.typography.titleLarge,
+                        text = "اتصال خودکار به پیامک همه بانکها: فعال ✓",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
                         color = AlabasterSilk
                     )
                 }
@@ -1246,21 +1218,44 @@ fun SmsSimulatorBottomSheet(
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(OrosiSurfaceContainer)
+                    .border(1.dp, NishapurTurquoise.copy(alpha = 0.45f), RoundedCornerShape(18.dp))
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "✓ دریافت و تفکیک ۱۰۰٪ خودکار در پس‌زمینه (بدون نیاز به ثبت دستی)",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    color = NishapurTurquoiseSoft
+                )
+                Text(
+                    text = "پشتیبانی خودکار از تمام بانک‌های ایران: بلوبانک، ملت، ملی، صادرات، تجارت، سامان، پاسارگاد، رسالت، سپه، مسکن، رفاه، آینده، پارسیان، اقتصاد نوین، مهر ایران، کشاورزی، سینا، شهر، گردشگری، ویپاد و آبانک.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = OrosiOnSurfaceVariant
+                )
+                Text(
+                    text = "• تفکیک هوشمند «مبلغ تراکنش» از «مانده حساب» و حذف خودکار پیامک‌های رمز پویا",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = SaffronGoldLight
+                )
+            }
 
-            // Prominent Real Device SMS Inbox 30-Day Scanner Button
             Button(
-                onClick = onScanDeviceInboxLast30Days,
+                onClick = onCleanPurgeAndRescanRealSms,
                 shape = RoundedCornerShape(16.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = PersianLapis,
                     contentColor = AlabasterSilk
                 ),
-                contentPadding = PaddingValues(vertical = 14.dp, horizontal = 14.dp),
+                contentPadding = PaddingValues(vertical = 16.dp, horizontal = 16.dp),
                 modifier = Modifier
                     .fillMaxWidth()
                     .border(1.dp, NishapurTurquoiseBright, RoundedCornerShape(16.dp))
-                    .testTag("scan_device_sms_inbox_button")
+                    .testTag("clean_rescan_real_sms_button")
             ) {
                 Icon(
                     imageVector = Icons.Default.Sync,
@@ -1269,116 +1264,8 @@ fun SmsSimulatorBottomSheet(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "اسکن خودکار پیامک‌های بانکی گوشی (۳۰ روز اخیر)",
+                    text = "پاکسازی و بازخوانی تمیز پیامکهای واقعی",
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                samples.forEachIndexed { idx, sample ->
-                    val selected = rawSmsText == sample.smsText
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(
-                                if (selected) NishapurTurquoise.copy(alpha = 0.28f)
-                                else OrosiSurfaceContainer
-                            )
-                            .border(
-                                1.dp,
-                                if (selected) NishapurTurquoiseBright else OrosiHairline,
-                                RoundedCornerShape(50)
-                            )
-                            .clickable { rawSmsText = sample.smsText }
-                            .padding(horizontal = 12.dp, vertical = 6.dp)
-                            .testTag("sms_preset_$idx")
-                    ) {
-                        Text(
-                            text = sample.label,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = AlabasterSilk
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            OutlinedTextField(
-                value = rawSmsText,
-                onValueChange = { rawSmsText = it },
-                label = { Text("متن پیامک بانک (بلو، ملت، ملی، سامان، رسالت)") },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("sms_input_field"),
-                minLines = 3,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = NishapurTurquoiseBright,
-                    unfocusedBorderColor = OrosiHairline,
-                    focusedTextColor = AlabasterSilk,
-                    unfocusedTextColor = AlabasterSilk
-                )
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(OrosiSurfaceHigh)
-                    .border(1.dp, NishapurTurquoise.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
-                    .padding(14.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "مبلغ به تومان:",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = OrosiOnSurfaceVariant
-                    )
-                    Text(
-                        text = PersianNumberUtils.formatToman(preview.amountToman, true),
-                        style = MaterialTheme.typography.titleSmall,
-                        color = AlabasterSilk
-                    )
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = preview.summaryMessage,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = SaffronGoldLight
-                )
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Button(
-                onClick = { onProcessSms(rawSmsText) },
-                shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = NishapurTurquoise,
-                    contentColor = AlabasterSilk
-                ),
-                contentPadding = PaddingValues(vertical = 15.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("process_sms_button")
-            ) {
-                Icon(imageVector = Icons.Default.Check, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "پردازش پیامک",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 )
             }
         }

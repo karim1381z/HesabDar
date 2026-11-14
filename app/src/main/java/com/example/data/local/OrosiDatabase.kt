@@ -36,9 +36,10 @@ data class TransactionEntity(
     val shortBankName: String
         get() = cardInfo
             .replace("کارت", "")
+            .replace("حساب", "")
             .replace(Regex("[۰-۹0-9]+"), "")
             .trim()
-            .ifEmpty { "بلو" }
+            .ifEmpty { "بانک" }
 
     val simpleSubtitle: String
         get() = "$weekdayDate • $timeStr • $shortBankName"
@@ -92,6 +93,9 @@ interface OrosiDao {
     @Update
     suspend fun updateTransaction(tx: TransactionEntity)
 
+    @Query("DELETE FROM transactions WHERE id = :id")
+    suspend fun deleteTransactionById(id: Long)
+
     @Query("DELETE FROM transactions")
     suspend fun clearAllTransactions()
 
@@ -144,7 +148,7 @@ abstract class OrosiDatabase : RoomDatabase() {
                     context.applicationContext,
                     OrosiDatabase::class.java,
                     "orosi_finance_offline.db"
-                ).build()
+                ).fallbackToDestructiveMigration().build()
                 INSTANCE = instance
                 instance
             }

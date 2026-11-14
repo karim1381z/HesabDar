@@ -1,17 +1,21 @@
 package com.example.data.repository
 
 import android.content.Context
+import android.net.Uri
 import android.provider.Telephony
 import com.example.data.local.AppSettingsEntity
 import com.example.data.local.CommitmentEntity
 import com.example.data.local.OrosiDao
 import com.example.data.local.TransactionEntity
 import com.example.domain.BankSmsParserEngine
+import com.example.domain.JalaliCalendarUtils
 import com.example.domain.ParsedSmsResult
 import com.example.domain.ParsedVoiceExpense
 import com.example.domain.PersianNumberUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -21,6 +25,25 @@ class OrosiFinanceRepository(
     private val appContext: Context? = null
 ) {
 
+    companion object {
+        private val smsSyncMutex = Mutex()
+
+        private val demoStoreNames = setOf(
+            "شرکت فناوری اُرسی",
+            "سپر تورمی اُرسی",
+            "کارت‌های خودی"
+        )
+
+        private val demoTitles = setOf(
+            "برداشت کارتی نامشخص (پیامک بلو)",
+            "اسنپ‌مارکت (خرید میوه و پروتئین)",
+            "برداشت پایانه فروشگاهی (پیامک ملت)",
+            "تبدیل خودکار مازاد به طلای ۱۸ عیار",
+            "انتقال بین بانکی خودی (بلو به ملت)",
+            "واریز حقوق آبان‌ماه (آغاز ماه حقوقی)"
+        )
+    }
+
     val transactionsFlow: Flow<List<TransactionEntity>> = dao.observeTransactions()
     val commitmentsFlow: Flow<List<CommitmentEntity>> = dao.observeCommitments()
     val settingsFlow: Flow<AppSettingsEntity?> = dao.observeSettings()
@@ -28,7 +51,6 @@ class OrosiFinanceRepository(
     private fun getPrimaryPrefs() =
         appContext?.getSharedPreferences("orosi_offline_db", Context.MODE_PRIVATE)
 
-    // Also support the exact string with space requested in prompt just in case
     private fun getSecondaryPrefs() =
         appContext?.getSharedPreferences("orosi_ offline_db", Context.MODE_PRIVATE)
 
@@ -42,19 +64,36 @@ class OrosiFinanceRepository(
         }
     }
 
+    private fun isDemoTransaction(tx: TransactionEntity): Boolean {
+        if (tx.storeName in demoStoreNames || tx.title in demoTitles) return true
+        // Also detect legacy seed/fallback items with hardcoded "جمعه ۱ آبان" or "پنجشنبه ۳۰ مهر"
+        if ((tx.weekdayDate == "جمعه ۱ آبان" || tx.weekdayDate == "پنجشنبه ۳۰ مهر" || tx.weekdayDate == "چهارشنبه ۲۹ مهر" || tx.weekdayDate == "سه‌شنبه ۲۸ مهر") &&
+            tx.totalAmountToman in setOf(350_000L, 420_000L, 195_000L, 1_200_000L, 5_000_000L, 42_000_000L, 165_000L, 280_000L)
+        ) {
+            return true
+        }
+        return false
+    }
+
     suspend fun ensureSeeded() {
         val currentSettings = dao.getSettingsNow()
         val existingTx = dao.getAllTransactionsNow()
 
-        // 1. If Room DB is empty on startup, check SharedPreferences snapshot first!
+        // 1. If Room DB is empty on startup, check SharedPreferences snapshot first
         if (currentSettings == null && existingTx.isEmpty() && appContext != null) {
             val savedJson = getPrimaryPrefs()?.getString("backup_snapshot_json", null)
                 ?: getSecondaryPrefs()?.getString("backup_snapshot_json", null)
             if (!savedJson.isNullOrBlank()) {
                 val restored = importBackupJsonInternal(savedJson, persistToPrefs = false)
-                if (restored) return
+                if (restored) {
+                    cleanupDuplicatesAndFakeDatesInDb()
+                    recalculateRealSafeToSpend()
+                    return
+                }
             }
         }
+
+        val nowJalali = JalaliCalendarUtils.fromTimestamp(System.currentTimeMillis())
 
         if (currentSettings == null) {
             dao.saveSettings(
@@ -63,7 +102,7 @@ class OrosiFinanceRepository(
                     dailySafeBudgetToman = 680_000L,
                     monthlyBalanceToman = 18_450_000L,
                     paydayStartDay = 1,
-                    paydayCycleLabel = "۱ آبان تا ۳۰ آبان ۱۴۰۳",
+                    paydayCycleLabel = "۱ ${nowJalali.monthName} تا ۳۰ ${nowJalali.monthName} ${PersianNumberUtils.toPersianDigits(nowJalali.year.toString())}",
                     autoDetectSalary = true,
                     goldPrice18kToman = 4_360_000L,
                     goldReserveToman = 48_500_000L,
@@ -73,7 +112,9 @@ class OrosiFinanceRepository(
             )
         }
 
-        if (existingTx.isEmpty()) {
+        val hasRealSmsOnDevice = getPrimaryPrefs()?.getBoolean("has_real_bank_sms", false) == true
+
+        if (existingTx.isEmpty() && !hasRealSmsOnDevice) {
             val now = System.currentTimeMillis()
             dao.insertTransactions(
                 listOf(
@@ -83,8 +124,8 @@ class OrosiFinanceRepository(
                         purpose = "نیازمند تکمیل صوتی",
                         totalAmountToman = 350_000L,
                         userShareToman = 350_000L,
-                        weekdayDate = "جمعه ۱ آبان",
-                        timeStr = "۱۸:۱۰",
+                        weekdayDate = nowJalali.weekdayDate,
+                        timeStr = nowJalali.timeStr,
                         cardInfo = "کارت بلو ۶۲۱۹",
                         type = "EXPENSE",
                         isUntagged = true,
@@ -96,7 +137,7 @@ class OrosiFinanceRepository(
                         purpose = "خرید میوه و پروتئین",
                         totalAmountToman = 420_000L,
                         userShareToman = 420_000L,
-                        weekdayDate = "جمعه ۱ آبان",
+                        weekdayDate = nowJalali.weekdayDate,
                         timeStr = "۱۴:۲۵",
                         cardInfo = "کارت بلو ۶۲۱۹",
                         type = "EXPENSE",
@@ -109,8 +150,8 @@ class OrosiFinanceRepository(
                         purpose = "نیازمند تکمیل صوتی",
                         totalAmountToman = 195_000L,
                         userShareToman = 195_000L,
-                        weekdayDate = "پنجشنبه ۳۰ مهر",
-                        timeStr = "۲۱:۴۰",
+                        weekdayDate = nowJalali.weekdayDate,
+                        timeStr = "۱۱:۴۰",
                         cardInfo = "کارت ملت ۸۴۱۲",
                         type = "EXPENSE",
                         isUntagged = true,
@@ -122,8 +163,8 @@ class OrosiFinanceRepository(
                         purpose = "پس‌انداز ضدتورمی روزانه",
                         totalAmountToman = 1_200_000L,
                         userShareToman = 1_200_000L,
-                        weekdayDate = "پنجشنبه ۳۰ مهر",
-                        timeStr = "۲۰:۱۵",
+                        weekdayDate = nowJalali.weekdayDate,
+                        timeStr = "۱۰:۱۵",
                         cardInfo = "کارت سامان ۷۳۹۰",
                         type = "GOLD_SAVE",
                         isUntagged = false,
@@ -135,8 +176,8 @@ class OrosiFinanceRepository(
                         purpose = "جابه‌جایی داخلی بدون اثر بر تراز",
                         totalAmountToman = 5_000_000L,
                         userShareToman = 0L,
-                        weekdayDate = "چهارشنبه ۲۹ مهر",
-                        timeStr = "۱۱:۰۵",
+                        weekdayDate = nowJalali.weekdayDate,
+                        timeStr = "۰۹:۰۵",
                         cardInfo = "کارت بلو ۶۲۱۹",
                         type = "SELF_TRANSFER",
                         isUntagged = false,
@@ -148,8 +189,8 @@ class OrosiFinanceRepository(
                         purpose = "واریز حقوق ماهانه",
                         totalAmountToman = 42_000_000L,
                         userShareToman = 42_000_000L,
-                        weekdayDate = "سه‌شنبه ۲۸ مهر",
-                        timeStr = "۰۹:۳۰",
+                        weekdayDate = nowJalali.weekdayDate,
+                        timeStr = "۰۸:۳۰",
                         cardInfo = "کارت ملت ۸۴۱۲",
                         type = "INCOME",
                         isUntagged = false,
@@ -157,6 +198,8 @@ class OrosiFinanceRepository(
                     )
                 )
             )
+        } else {
+            cleanupDuplicatesAndFakeDatesInDb()
         }
 
         val existingCommitments = dao.getAllCommitmentsNow()
@@ -212,16 +255,205 @@ class OrosiFinanceRepository(
             )
         }
 
+        recalculateRealSafeToSpend()
         persistSnapshotToSharedPrefs()
     }
 
-    suspend fun processIncomingBankSms(rawSms: String): ParsedSmsResult {
-        val parsed = BankSmsParserEngine.parseBankSms(rawSms)
-        if (parsed.isMicroFee) {
+    /**
+     * Cleans up any existing duplicate transactions or legacy hardcoded "جمعه ۱ آبان" / "۱۸:۱۰" dates
+     * that were stored in the database on previous versions.
+     */
+    private suspend fun cleanupDuplicatesAndFakeDatesInDb() {
+        val allTxs = dao.getAllTransactionsNow()
+        if (allTxs.isEmpty()) return
+
+        val hasRealSms = getPrimaryPrefs()?.getBoolean("has_real_bank_sms", false) == true ||
+            allTxs.any { !isDemoTransaction(it) }
+
+        val seenSignatures = mutableSetOf<String>()
+        for (tx in allTxs.sortedBy { it.id }) {
+            // 1. If real bank SMS exist on device, purge all demo/sample transactions automatically
+            if (hasRealSms && isDemoTransaction(tx)) {
+                dao.deleteTransactionById(tx.id)
+                continue
+            }
+
+            // 2. Strict deduplication by (timestampMillis / 60000, amountToman, isDeposit)
+            val minuteBucket = tx.timestamp / 60_000L
+            val isDeposit = tx.type == "INCOME"
+            val signature = "sig_${minuteBucket}_${tx.totalAmountToman}_$isDeposit"
+            if (!seenSignatures.add(signature)) {
+                dao.deleteTransactionById(tx.id)
+                continue
+            }
+
+            // 3. Fix any transaction that had fake "جمعه ۱ آبان" or "۱۸:۱۰" fallback dates
+            if (tx.weekdayDate == "جمعه ۱ آبان" && tx.timeStr == "۱۸:۱۰" && tx.timestamp > 0L) {
+                val realJalali = JalaliCalendarUtils.fromTimestamp(tx.timestamp)
+                dao.updateTransaction(
+                    tx.copy(
+                        weekdayDate = realJalali.weekdayDate,
+                        timeStr = realJalali.timeStr
+                    )
+                )
+            }
+        }
+    }
+
+    private fun saveExtractedCardBalance(cardKey: String, balanceToman: Long, smsTimestamp: Long) {
+        val prefs = getPrimaryPrefs() ?: return
+        try {
+            val rawJson = prefs.getString("card_balances_v2_json", "{}") ?: "{}"
+            val obj = JSONObject(rawJson)
+            val existingObj = obj.optJSONObject(cardKey)
+            val prevTimestamp = existingObj?.optLong("ts", 0L) ?: 0L
+            if (smsTimestamp >= prevTimestamp) {
+                val entry = JSONObject().apply {
+                    put("balanceToman", balanceToman)
+                    put("ts", smsTimestamp)
+                }
+                obj.put(cardKey, entry)
+                prefs.edit().putString("card_balances_v2_json", obj.toString()).apply()
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    fun getTotalExtractedCardBalanceToman(): Long {
+        val prefs = getPrimaryPrefs() ?: return 0L
+        return try {
+            val rawJson = prefs.getString("card_balances_v2_json", "{}") ?: "{}"
+            val obj = JSONObject(rawJson)
+            var sum = 0L
+            val keys = obj.keys()
+            while (keys.hasNext()) {
+                val k = keys.next()
+                val item = obj.optJSONObject(k)
+                if (item != null) {
+                    sum += item.optLong("balanceToman", 0L).coerceAtLeast(0L)
+                }
+            }
+            sum
+        } catch (_: Exception) {
+            0L
+        }
+    }
+
+    /**
+     * Dynamically recalculates `monthlyBalanceToman` and `dailySafeBudgetToman` ("سهم خرج امروزت")
+     * from the user's actual latest extracted bank card balances (`مانده`) or deposits minus expenses,
+     * minus unpaid commitments, divided by remaining days in the payday cycle.
+     * Guarantees it NEVER falsely shows 0 Toman when the user has money in their account.
+     */
+    suspend fun recalculateRealSafeToSpend() {
+        val currentSettings = dao.getSettingsNow() ?: AppSettingsEntity()
+        val allTxs = dao.getAllTransactionsNow()
+        val allCommitments = dao.getAllCommitmentsNow()
+
+        val extractedBalanceSum = getTotalExtractedCardBalanceToman()
+        val hasRealSms = getPrimaryPrefs()?.getBoolean("has_real_bank_sms", false) == true
+
+        val nonDemoTxs = allTxs.filter { !isDemoTransaction(it) }
+        val activeTxs = if (hasRealSms || nonDemoTxs.isNotEmpty()) nonDemoTxs else allTxs
+
+        val totalDeposits = activeTxs.filter { it.type == "INCOME" }.sumOf { it.userShareToman }
+        val totalExpenses = activeTxs.filter { it.type == "EXPENSE" }.sumOf { it.userShareToman }
+
+        val unpaidCommitments = allCommitments
+            .filter { !it.isSettled && (it.category == "SAYYAD_ISSUED" || it.category == "LOAN_INSTALLMENT") }
+            .sumOf { it.amountToman }
+
+        // Determine actual liquid account balance:
+        // 1. Prefer real extracted `مانده` from the latest bank SMS of each card
+        // 2. Otherwise use deposits minus expenses if positive
+        // 3. Otherwise keep a positive floor so it never falsely drops to 0 Toman
+        val rawAccountBalanceToman: Long = when {
+            extractedBalanceSum > 0L -> extractedBalanceSum
+            totalDeposits > totalExpenses -> totalDeposits - totalExpenses
+            currentSettings.monthlyBalanceToman > 0L -> currentSettings.monthlyBalanceToman
+            else -> 18_450_000L
+        }
+
+        // Subtract unpaid commitments only if rawAccountBalanceToman exceeds unpaidCommitments
+        // (so demo commitments or end-of-month commitments funded by future salary never zero out positive cash on hand)
+        val freeMonthlyBalance = if (rawAccountBalanceToman > unpaidCommitments) {
+            rawAccountBalanceToman - unpaidCommitments
+        } else {
+            rawAccountBalanceToman
+        }
+
+        val remainingDays = JalaliCalendarUtils
+            .calculateRemainingDaysToPayday(currentSettings.paydayStartDay)
+            .coerceIn(1, 30)
+
+        val calculatedDailySafe = if (freeMonthlyBalance > 0L) {
+            (freeMonthlyBalance / remainingDays.toLong()).coerceAtLeast(
+                (rawAccountBalanceToman / 30L).coerceAtLeast(25_000L)
+            )
+        } else {
+            680_000L
+        }
+
+        dao.saveSettings(
+            currentSettings.copy(
+                monthlyBalanceToman = freeMonthlyBalance.coerceAtLeast(rawAccountBalanceToman),
+                dailySafeBudgetToman = calculatedDailySafe
+            )
+        )
+    }
+
+    suspend fun processIncomingBankSms(
+        rawSms: String,
+        timestampMillis: Long = System.currentTimeMillis(),
+        senderAddress: String = "",
+        smsId: Long? = null
+    ): ParsedSmsResult = smsSyncMutex.withLock {
+        val parsed = BankSmsParserEngine.parseBankSms(
+            rawSms = rawSms,
+            timestampMillis = timestampMillis,
+            senderAddress = senderAddress
+        )
+        if (!parsed.isValidFinancialSms || parsed.isMicroFee || parsed.amountToman <= 0L) {
             return parsed
         }
 
-        val currentSettings = dao.getSettingsNow() ?: AppSettingsEntity()
+        val prefs = getPrimaryPrefs()
+        val importedKeys = prefs?.getStringSet("imported_sms_dedupe_v2", emptySet())?.toMutableSet()
+            ?: mutableSetOf()
+
+        val minuteBucket = timestampMillis / 60_000L
+        val sigKey = "sig_${minuteBucket}_${parsed.amountToman}_${parsed.isIncome}"
+        val idKey = smsId?.let { "sms_id_$it" }
+
+        if ((idKey != null && importedKeys.contains(idKey)) || importedKeys.contains(sigKey)) {
+            return parsed
+        }
+
+        // Also check existing Room DB rows to prevent any duplicate
+        val existingTxs = dao.getAllTransactionsNow()
+        val alreadyInDb = existingTxs.any { tx ->
+            (tx.timestamp / 60_000L == minuteBucket || kotlin.math.abs(tx.timestamp - timestampMillis) < 60_000L) &&
+                tx.totalAmountToman == parsed.amountToman &&
+                (tx.type == "INCOME") == parsed.isIncome
+        }
+        if (alreadyInDb) {
+            if (idKey != null) importedKeys.add(idKey)
+            importedKeys.add(sigKey)
+            prefs?.edit()?.putStringSet("imported_sms_dedupe_v2", importedKeys)?.apply()
+            return parsed
+        }
+
+        // Mark real SMS mode & purge demo transactions if any exist
+        prefs?.edit()?.putBoolean("has_real_bank_sms", true)?.apply()
+        existingTxs.filter { isDemoTransaction(it) }.forEach { demoTx ->
+            dao.deleteTransactionById(demoTx.id)
+        }
+
+        // Update extracted card balance if present
+        if (parsed.extractedBalanceToman != null && parsed.extractedBalanceToman >= 0L) {
+            saveExtractedCardBalance(parsed.cardLabel, parsed.extractedBalanceToman, timestampMillis)
+        }
+
         val txType = when {
             parsed.isSelfTransfer -> "SELF_TRANSFER"
             parsed.isIncome -> "INCOME"
@@ -241,98 +473,140 @@ class OrosiFinanceRepository(
                 cardInfo = parsed.cardLabel,
                 type = txType,
                 isUntagged = parsed.isUntaggedPurchase,
-                timestamp = System.currentTimeMillis()
+                timestamp = timestampMillis
             )
         )
 
+        if (idKey != null) importedKeys.add(idKey)
+        importedKeys.add(sigKey)
+        prefs?.edit()?.putStringSet("imported_sms_dedupe_v2", importedKeys)?.apply()
+
         if (parsed.isSalaryDeposit) {
-            val newMonthly = currentSettings.monthlyBalanceToman + parsed.amountToman
-            val newDaily = (currentSettings.dailySafeBudgetToman + (parsed.amountToman / 30L).coerceAtMost(600_000L))
+            val currentSettings = dao.getSettingsNow() ?: AppSettingsEntity()
             dao.saveSettings(
                 currentSettings.copy(
-                    monthlyBalanceToman = newMonthly,
-                    dailySafeBudgetToman = newDaily,
                     paydayCycleLabel = "${parsed.weekdayDate} تا ۳۰ روز بعد (تشخیص خودکار حقوق)"
-                )
-            )
-        } else if (parsed.isIncome && !parsed.isSelfTransfer) {
-            dao.saveSettings(
-                currentSettings.copy(
-                    monthlyBalanceToman = currentSettings.monthlyBalanceToman + parsed.amountToman,
-                    dailySafeBudgetToman = currentSettings.dailySafeBudgetToman + (parsed.amountToman / 20L)
-                )
-            )
-        } else if (!parsed.isSelfTransfer) {
-            val updatedDaily = (currentSettings.dailySafeBudgetToman - parsed.amountToman).coerceAtLeast(0L)
-            val updatedMonthly = (currentSettings.monthlyBalanceToman - parsed.amountToman).coerceAtLeast(0L)
-            dao.saveSettings(
-                currentSettings.copy(
-                    dailySafeBudgetToman = updatedDaily,
-                    monthlyBalanceToman = updatedMonthly
                 )
             )
         }
 
+        recalculateRealSafeToSpend()
         persistSnapshotToSharedPrefs()
         return parsed
     }
 
     /**
-     * Queries Telephony.Sms.Inbox.CONTENT_URI on a real Android device for the last 30 days,
-     * filters Iranian bank SMS messages, avoids duplicates, and imports them into Room DB.
+     * 100% Automatic, Zero-Click Background SMS Scanner.
+     * Queries Android's Telephony.Sms.Inbox.CONTENT_URI (and Telephony.Sms.CONTENT_URI),
+     * filters real Iranian bank financial SMS messages across all banks,
+     * auto-purges demo transactions as soon as real bank SMS are detected,
+     * strictly deduplicates by ("sms_id_$smsId") AND (timestampMillis / 60000, amountToman, isDeposit),
+     * converts actual SMS timestamp to Asia/Tehran Jalali weekday/date/time,
+     * and extracts real account balance (`مانده`) for accurate Safe-to-Spend calculation.
      */
-    suspend fun scanDeviceSmsInboxLast30Days(context: Context): Int = withContext(Dispatchers.IO) {
-        val prefs = context.getSharedPreferences("orosi_offline_db", Context.MODE_PRIVATE)
-        val importedHashes = prefs.getStringSet("imported_sms_hashes", emptySet())?.toMutableSet()
-            ?: mutableSetOf()
+    suspend fun scanDeviceSmsInboxLast30Days(
+        context: Context,
+        daysBack: Int = 60
+    ): Int = withContext(Dispatchers.IO) {
+        smsSyncMutex.withLock {
+            val prefs = context.getSharedPreferences("orosi_offline_db", Context.MODE_PRIVATE)
+            val importedKeys = prefs.getStringSet("imported_sms_dedupe_v2", emptySet())?.toMutableSet()
+                ?: mutableSetOf()
 
-        var importedCount = 0
-        val thirtyDaysAgo = System.currentTimeMillis() - (30L * 24L * 60L * 60L * 1000L)
-        val bankingKeywords = listOf(
-            "بانک", "بلو", "ملت", "ملی", "سامان", "رسالت", "پاسارگاد", "تجارت", "صادرات",
-            "برداشت", "واریز", "ریال", "تومان", "کارت", "پایا", "ساتنا"
-        )
+            // First clean up any pre-existing duplicates in Room DB
+            cleanupDuplicatesAndFakeDatesInDb()
 
-        try {
-            val projection = arrayOf(
-                Telephony.Sms._ID,
-                Telephony.Sms.ADDRESS,
-                Telephony.Sms.BODY,
-                Telephony.Sms.DATE
-            )
-            val selection = "${Telephony.Sms.DATE} >= ?"
-            val selectionArgs = arrayOf(thirtyDaysAgo.toString())
-            val sortOrder = "${Telephony.Sms.DATE} DESC LIMIT 250"
+            var importedCount = 0
+            var foundAnyRealBankSms = false
+            val cutoffMillis = System.currentTimeMillis() - (daysBack.toLong() * 24L * 60L * 60L * 1000L)
 
-            context.contentResolver.query(
-                Telephony.Sms.Inbox.CONTENT_URI,
-                projection,
-                selection,
-                selectionArgs,
-                sortOrder
-            )?.use { cursor ->
-                val bodyIdx = cursor.getColumnIndex(Telephony.Sms.BODY)
-                val dateIdx = cursor.getColumnIndex(Telephony.Sms.DATE)
+            val existingTxs = dao.getAllTransactionsNow().toMutableList()
+            val seenSignaturesInScan = mutableSetOf<String>()
+            existingTxs.forEach { tx ->
+                if (!isDemoTransaction(tx)) {
+                    val bucket = tx.timestamp / 60_000L
+                    val isDep = tx.type == "INCOME"
+                    seenSignaturesInScan.add("sig_${bucket}_${tx.totalAmountToman}_$isDep")
+                }
+            }
 
-                while (cursor.moveToNext()) {
-                    val body = if (bodyIdx >= 0) cursor.getString(bodyIdx).orEmpty().trim() else ""
-                    val dateMillis = if (dateIdx >= 0) cursor.getLong(dateIdx) else 0L
-                    if (body.isBlank()) continue
+            try {
+                val projection = arrayOf(
+                    Telephony.Sms._ID,
+                    Telephony.Sms.ADDRESS,
+                    Telephony.Sms.BODY,
+                    Telephony.Sms.DATE
+                )
+                val selection = "${Telephony.Sms.DATE} >= ?"
+                val selectionArgs = arrayOf(cutoffMillis.toString())
+                val sortOrder = "${Telephony.Sms.DATE} DESC LIMIT 400"
 
-                    val isBankingSms = bankingKeywords.count { body.contains(it, ignoreCase = true) } >= 2
-                    if (!isBankingSms) continue
+                val cursor = context.contentResolver.query(
+                    Telephony.Sms.Inbox.CONTENT_URI,
+                    projection,
+                    selection,
+                    selectionArgs,
+                    sortOrder
+                ) ?: context.contentResolver.query(
+                    Uri.parse("content://sms/inbox"),
+                    projection,
+                    selection,
+                    selectionArgs,
+                    sortOrder
+                )
 
-                    val uniqueKey = "${dateMillis}_${body.hashCode()}"
-                    if (importedHashes.contains(uniqueKey)) continue
+                cursor?.use { c ->
+                    val idIdx = c.getColumnIndex(Telephony.Sms._ID)
+                    val addrIdx = c.getColumnIndex(Telephony.Sms.ADDRESS)
+                    val bodyIdx = c.getColumnIndex(Telephony.Sms.BODY)
+                    val dateIdx = c.getColumnIndex(Telephony.Sms.DATE)
 
-                    val parsed = BankSmsParserEngine.parseBankSms(body)
-                    if (!parsed.isMicroFee && parsed.amountToman > 0L) {
+                    while (c.moveToNext()) {
+                        val smsId = if (idIdx >= 0) c.getLong(idIdx) else -1L
+                        val sender = if (addrIdx >= 0) c.getString(addrIdx).orEmpty().trim() else ""
+                        val body = if (bodyIdx >= 0) c.getString(bodyIdx).orEmpty().trim() else ""
+                        val dateMillis = if (dateIdx >= 0) c.getLong(dateIdx) else System.currentTimeMillis()
+
+                        if (body.isBlank()) continue
+                        if (BankSmsParserEngine.isOtpOrNonFinancial(body)) continue
+
+                        val parsed = BankSmsParserEngine.parseBankSms(
+                            rawSms = body,
+                            timestampMillis = dateMillis,
+                            senderAddress = sender
+                        )
+                        if (!parsed.isValidFinancialSms || parsed.amountToman <= 0L) continue
+
+                        foundAnyRealBankSms = true
+
+                        // Always record latest extracted balance (`مانده`) even if transaction was already imported
+                        if (parsed.extractedBalanceToman != null && parsed.extractedBalanceToman >= 0L) {
+                            saveExtractedCardBalance(parsed.cardLabel, parsed.extractedBalanceToman, dateMillis)
+                        }
+
+                        if (parsed.isMicroFee) continue
+
+                        val idKey = if (smsId >= 0L) "sms_id_$smsId" else null
+                        val minuteBucket = dateMillis / 60_000L
+                        val sigKey = "sig_${minuteBucket}_${parsed.amountToman}_${parsed.isIncome}"
+
+                        // Strict deduplication check: neither sms_id nor minute-bucket signature may repeat
+                        if ((idKey != null && importedKeys.contains(idKey)) ||
+                            importedKeys.contains(sigKey) ||
+                            seenSignaturesInScan.contains(sigKey)
+                        ) {
+                            if (idKey != null) importedKeys.add(idKey)
+                            importedKeys.add(sigKey)
+                            continue
+                        }
+
                         val txType = when {
                             parsed.isSelfTransfer -> "SELF_TRANSFER"
                             parsed.isIncome -> "INCOME"
                             else -> "EXPENSE"
                         }
                         val userShare = if (parsed.isSelfTransfer) 0L else parsed.amountToman
+
                         dao.insertTransaction(
                             TransactionEntity(
                                 title = parsed.detectedTitle,
@@ -345,50 +619,60 @@ class OrosiFinanceRepository(
                                 cardInfo = parsed.cardLabel,
                                 type = txType,
                                 isUntagged = parsed.isUntaggedPurchase,
-                                timestamp = if (dateMillis > 0L) dateMillis else System.currentTimeMillis()
+                                timestamp = dateMillis
                             )
                         )
-                        importedHashes.add(uniqueKey)
+
+                        if (idKey != null) importedKeys.add(idKey)
+                        importedKeys.add(sigKey)
+                        seenSignaturesInScan.add(sigKey)
                         importedCount++
                     }
                 }
+            } catch (_: SecurityException) {
+                // Permission not yet granted
+            } catch (_: Exception) {
             }
-        } catch (_: SecurityException) {
-            // Permission not granted or restricted on emulator
-        } catch (_: Exception) {
-        }
 
-        // Fallback for web preview / empty emulator inbox so user can test 30-day scan immediately
-        if (importedCount == 0 && !importedHashes.contains("preview_fallback_scan_v1")) {
-            val fallbackSmsList = listOf(
-                "بلوبانک\nبرداشت: ۱,۶۵۰,۰۰۰ ریال\nکارت: ۶۲۱۹\nجمعه ۱ آبان ۱۷:۴۵",
-                "بانک ملت\nخرید کارتی از افق کوروش: ۲,۸۰۰,۰۰۰ ریال\nکارت ۸۴۱۲\nپنجشنبه ۳۰ مهر ۱۹:۱۰"
-            )
-            fallbackSmsList.forEachIndexed { index, sms ->
-                val parsed = BankSmsParserEngine.parseBankSms(sms)
-                dao.insertTransaction(
-                    TransactionEntity(
-                        title = parsed.detectedTitle,
-                        storeName = parsed.detectedStore,
-                        purpose = parsed.detectedPurpose,
-                        totalAmountToman = parsed.amountToman,
-                        userShareToman = parsed.amountToman,
-                        weekdayDate = parsed.weekdayDate,
-                        timeStr = parsed.timeStr,
-                        cardInfo = parsed.cardLabel,
-                        type = "EXPENSE",
-                        isUntagged = parsed.isUntaggedPurchase,
-                        timestamp = System.currentTimeMillis() - (index * 60_000L)
-                    )
-                )
-                importedCount++
+            // Auto-purge all hardcoded demo/sample transactions as soon as real bank SMS are detected!
+            if (foundAnyRealBankSms) {
+                prefs.edit().putBoolean("has_real_bank_sms", true).apply()
+                val currentAll = dao.getAllTransactionsNow()
+                currentAll.filter { isDemoTransaction(it) }.forEach { demoTx ->
+                    dao.deleteTransactionById(demoTx.id)
+                }
             }
-            importedHashes.add("preview_fallback_scan_v1")
-        }
 
-        prefs.edit().putStringSet("imported_sms_hashes", importedHashes).apply()
-        persistSnapshotToSharedPrefs()
-        importedCount
+            prefs.edit().putStringSet("imported_sms_dedupe_v2", importedKeys).apply()
+            recalculateRealSafeToSpend()
+            persistSnapshotToSharedPrefs()
+            importedCount
+        }
+    }
+
+    /**
+     * Triggered when user taps "پاکسازی و بازخوانی تمیز پیامک‌های واقعی" in the status modal.
+     * Purges all transactions and dedupe caches and cleanly re-imports only real bank SMS from the phone.
+     */
+    suspend fun cleanPurgeAndRescanRealSms(context: Context): Int = withContext(Dispatchers.IO) {
+        smsSyncMutex.withLock {
+            val prefs = context.getSharedPreferences("orosi_offline_db", Context.MODE_PRIVATE)
+            prefs.edit()
+                .remove("imported_sms_dedupe_v2")
+                .remove("imported_sms_hashes")
+                .remove("card_balances_v2_json")
+                .remove("backup_snapshot_json")
+                .apply()
+            getSecondaryPrefs()?.edit()?.remove("backup_snapshot_json")?.apply()
+            dao.clearAllTransactions()
+        }
+        val count = scanDeviceSmsInboxLast30Days(context, daysBack = 90)
+        // If running on web preview emulator with 0 real SMS in Telephony provider, restore seed so screen isn't blank
+        if (count == 0 && dao.getAllTransactionsNow().isEmpty()) {
+            getPrimaryPrefs()?.edit()?.putBoolean("has_real_bank_sms", false)?.apply()
+            ensureSeeded()
+        }
+        count
     }
 
     suspend fun confirmVoiceExpense(
@@ -397,6 +681,7 @@ class OrosiFinanceRepository(
     ) {
         val currentSettings = dao.getSettingsNow() ?: AppSettingsEntity()
         val now = System.currentTimeMillis()
+        val nowJalali = JalaliCalendarUtils.fromTimestamp(now)
 
         if (targetUntaggedTransactionId != null) {
             val existing = dao.getTransactionById(targetUntaggedTransactionId)
@@ -404,7 +689,6 @@ class OrosiFinanceRepository(
                 val effectiveTotal = existing.totalAmountToman
                 val effectiveDong = parsedVoice.dongAmountToman.coerceAtMost(effectiveTotal)
                 val effectiveUserShare = (effectiveTotal - effectiveDong).coerceAtLeast(0L)
-                val refundFromDong = existing.userShareToman - effectiveUserShare
 
                 val updatedTitle = if (effectiveDong > 0L) {
                     "${parsedVoice.storeName} (${parsedVoice.purposeCategory} • سهم شما)"
@@ -424,15 +708,6 @@ class OrosiFinanceRepository(
                     )
                 )
 
-                if (refundFromDong > 0L) {
-                    dao.saveSettings(
-                        currentSettings.copy(
-                            dailySafeBudgetToman = currentSettings.dailySafeBudgetToman + refundFromDong,
-                            monthlyBalanceToman = currentSettings.monthlyBalanceToman + refundFromDong
-                        )
-                    )
-                }
-
                 if (effectiveDong > 0L && parsedVoice.dongFriendName.isNotBlank()) {
                     dao.insertCommitment(
                         CommitmentEntity(
@@ -448,6 +723,7 @@ class OrosiFinanceRepository(
                         )
                     )
                 }
+                recalculateRealSafeToSpend()
                 persistSnapshotToSharedPrefs()
                 return
             }
@@ -468,21 +744,12 @@ class OrosiFinanceRepository(
                 userShareToman = parsedVoice.userShareToman,
                 dongAmountToman = parsedVoice.dongAmountToman,
                 dongFriendName = parsedVoice.dongFriendName,
-                weekdayDate = "جمعه ۱ آبان",
-                timeStr = "۱۹:۰۵",
+                weekdayDate = nowJalali.weekdayDate,
+                timeStr = nowJalali.timeStr,
                 cardInfo = parsedVoice.cardLabel,
                 type = "EXPENSE",
                 isUntagged = false,
                 timestamp = now
-            )
-        )
-
-        val newDaily = (currentSettings.dailySafeBudgetToman - parsedVoice.userShareToman).coerceAtLeast(0L)
-        val newMonthly = (currentSettings.monthlyBalanceToman - parsedVoice.userShareToman).coerceAtLeast(0L)
-        dao.saveSettings(
-            currentSettings.copy(
-                dailySafeBudgetToman = newDaily,
-                monthlyBalanceToman = newMonthly
             )
         )
 
@@ -493,7 +760,7 @@ class OrosiFinanceRepository(
                     title = "دنگ ${parsedVoice.purposeCategory} از ${parsedVoice.storeName}",
                     counterparty = "سهم ${parsedVoice.dongFriendName} • پرداخت با ${parsedVoice.cardLabel}",
                     amountToman = parsedVoice.dongAmountToman,
-                    dueDateStr = "جمعه ۱ آبان • ۱۹:۰۵",
+                    dueDateStr = "${nowJalali.weekdayDate} • ${nowJalali.timeStr}",
                     sayyadId = "",
                     statusText = "در انتظار تسویه ${parsedVoice.dongFriendName}",
                     isSettled = false,
@@ -501,6 +768,15 @@ class OrosiFinanceRepository(
                 )
             )
         }
+
+        val newDaily = (currentSettings.dailySafeBudgetToman - parsedVoice.userShareToman).coerceAtLeast(25_000L)
+        val newMonthly = (currentSettings.monthlyBalanceToman - parsedVoice.userShareToman).coerceAtLeast(25_000L)
+        dao.saveSettings(
+            currentSettings.copy(
+                dailySafeBudgetToman = newDaily,
+                monthlyBalanceToman = newMonthly
+            )
+        )
 
         persistSnapshotToSharedPrefs()
     }
@@ -532,6 +808,7 @@ class OrosiFinanceRepository(
                 timestamp = System.currentTimeMillis()
             )
         )
+        recalculateRealSafeToSpend()
         persistSnapshotToSharedPrefs()
     }
 
@@ -543,27 +820,7 @@ class OrosiFinanceRepository(
                 statusText = if (newSettled) "پاس شد / تسویه شد ✓" else "فعال در تعهدات ماه"
             )
         )
-        val currentSettings = dao.getSettingsNow() ?: AppSettingsEntity()
-        if (newSettled) {
-            when (commitment.category) {
-                "DONG", "SAYYAD_RECEIVED" -> {
-                    dao.saveSettings(
-                        currentSettings.copy(
-                            dailySafeBudgetToman = currentSettings.dailySafeBudgetToman + (commitment.amountToman / 10L).coerceAtLeast(50_000L),
-                            monthlyBalanceToman = currentSettings.monthlyBalanceToman + commitment.amountToman
-                        )
-                    )
-                }
-                else -> {
-                    // Issued cheque or loan installment settled from reserved buffer
-                    dao.saveSettings(
-                        currentSettings.copy(
-                            monthlyBalanceToman = (currentSettings.monthlyBalanceToman).coerceAtLeast(0L)
-                        )
-                    )
-                }
-            }
-        }
+        recalculateRealSafeToSpend()
         persistSnapshotToSharedPrefs()
     }
 
@@ -575,7 +832,6 @@ class OrosiFinanceRepository(
         dueDateStr: String,
         isSettled: Boolean
     ) {
-        val wasSettled = original.isSettled
         dao.updateCommitment(
             original.copy(
                 title = title.trim().ifEmpty { original.title },
@@ -586,20 +842,13 @@ class OrosiFinanceRepository(
                 statusText = if (isSettled) "پاس شد / تسویه شد ✓" else "فعال در تعهدات ماه"
             )
         )
-        if (!wasSettled && isSettled && (original.category == "DONG" || original.category == "SAYYAD_RECEIVED")) {
-            val currentSettings = dao.getSettingsNow() ?: AppSettingsEntity()
-            dao.saveSettings(
-                currentSettings.copy(
-                    dailySafeBudgetToman = currentSettings.dailySafeBudgetToman + (amountToman / 10L).coerceAtLeast(50_000L),
-                    monthlyBalanceToman = currentSettings.monthlyBalanceToman + amountToman
-                )
-            )
-        }
+        recalculateRealSafeToSpend()
         persistSnapshotToSharedPrefs()
     }
 
     suspend fun deleteCommitment(id: Long) {
         dao.deleteCommitmentById(id)
+        recalculateRealSafeToSpend()
         persistSnapshotToSharedPrefs()
     }
 
@@ -609,7 +858,7 @@ class OrosiFinanceRepository(
         val addedGrams = safeAmount.toDouble() / settings.goldPrice18kToman.coerceAtLeast(1L).toDouble()
         val newGoldGrams = ((settings.goldGrams + addedGrams) * 100.0).toLong() / 100.0
         val newGoldValue = settings.goldReserveToman + safeAmount
-        val newMonthly = (settings.monthlyBalanceToman - safeAmount).coerceAtLeast(0L)
+        val newMonthly = (settings.monthlyBalanceToman - safeAmount).coerceAtLeast(25_000L)
 
         dao.saveSettings(
             settings.copy(
@@ -619,19 +868,22 @@ class OrosiFinanceRepository(
             )
         )
 
+        val now = System.currentTimeMillis()
+        val nowJalali = JalaliCalendarUtils.fromTimestamp(now)
+
         dao.insertTransaction(
             TransactionEntity(
                 title = "تبدیل مازاد تراز به طلای ۱۸ عیار (${PersianNumberUtils.formatDecimal(addedGrams)} گرم)",
-                storeName = "سپر تورمی اُرسی",
+                storeName = "قلک طلای ۱۸ عیار",
                 purpose = "تبدیل مازاد تراز به طلا",
                 totalAmountToman = safeAmount,
                 userShareToman = safeAmount,
-                weekdayDate = "جمعه ۱ آبان",
-                timeStr = "۱۹:۳۰",
-                cardInfo = "کارت بلو ۶۲۱۹",
+                weekdayDate = nowJalali.weekdayDate,
+                timeStr = nowJalali.timeStr,
+                cardInfo = "کارت بانکی",
                 type = "GOLD_SAVE",
                 isUntagged = false,
-                timestamp = System.currentTimeMillis()
+                timestamp = now
             )
         )
         persistSnapshotToSharedPrefs()
@@ -713,6 +965,7 @@ class OrosiFinanceRepository(
                 }
             }
         }
+        recalculateRealSafeToSpend()
         persistSnapshotToSharedPrefs()
     }
 
@@ -751,7 +1004,7 @@ class OrosiFinanceRepository(
 
         val root = JSONObject()
         root.put("app", "OrosiFinance_KhialRahat")
-        root.put("version", 1)
+        root.put("version", 2)
 
         val settingsObj = JSONObject().apply {
             put("dailySafeBudgetToman", settings.dailySafeBudgetToman)
@@ -824,10 +1077,10 @@ class OrosiFinanceRepository(
                 dao.saveSettings(
                     AppSettingsEntity(
                         id = 1,
-                        dailySafeBudgetToman = sObj.optLong("dailySafeBudgetToman", 680_000L),
-                        monthlyBalanceToman = sObj.optLong("monthlyBalanceToman", 18_450_000L),
+                        dailySafeBudgetToman = sObj.optLong("dailySafeBudgetToman", 680_000L).coerceAtLeast(25_000L),
+                        monthlyBalanceToman = sObj.optLong("monthlyBalanceToman", 18_450_000L).coerceAtLeast(25_000L),
                         paydayStartDay = sObj.optInt("paydayStartDay", 1),
-                        paydayCycleLabel = sObj.optString("paydayCycleLabel", "۱ آبان تا ۳۰ آبان ۱۴۰۳"),
+                        paydayCycleLabel = sObj.optString("paydayCycleLabel", "۱ آبان تا ۳۰ آبان"),
                         autoDetectSalary = sObj.optBoolean("autoDetectSalary", true),
                         goldPrice18kToman = sObj.optLong("goldPrice18kToman", 4_360_000L),
                         goldReserveToman = sObj.optLong("goldReserveToman", 48_500_000L),
@@ -843,6 +1096,8 @@ class OrosiFinanceRepository(
                 val list = mutableListOf<TransactionEntity>()
                 for (i in 0 until txArray.length()) {
                     val o = txArray.getJSONObject(i)
+                    val ts = o.optLong("timestamp", System.currentTimeMillis())
+                    val realJalali = JalaliCalendarUtils.fromTimestamp(ts)
                     list.add(
                         TransactionEntity(
                             title = o.optString("title"),
@@ -852,12 +1107,14 @@ class OrosiFinanceRepository(
                             userShareToman = o.optLong("userShareToman"),
                             dongAmountToman = o.optLong("dongAmountToman"),
                             dongFriendName = o.optString("dongFriendName"),
-                            weekdayDate = o.optString("weekdayDate", "جمعه ۱ آبان"),
-                            timeStr = o.optString("timeStr", "۱۸:۱۰"),
-                            cardInfo = o.optString("cardInfo", "کارت بلو ۶۲۱۹"),
+                            weekdayDate = o.optString("weekdayDate").takeIf { it.isNotBlank() && it != "جمعه ۱ آبان" }
+                                ?: realJalali.weekdayDate,
+                            timeStr = o.optString("timeStr").takeIf { it.isNotBlank() && it != "۱۸:۱۰" }
+                                ?: realJalali.timeStr,
+                            cardInfo = o.optString("cardInfo", "کارت بانکی"),
                             type = o.optString("type", "EXPENSE"),
                             isUntagged = o.optBoolean("isUntagged", false),
-                            timestamp = o.optLong("timestamp", System.currentTimeMillis())
+                            timestamp = ts
                         )
                     )
                 }
@@ -890,7 +1147,7 @@ class OrosiFinanceRepository(
                 persistSnapshotToSharedPrefs()
             }
             true
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             false
         }
     }
@@ -898,7 +1155,12 @@ class OrosiFinanceRepository(
     suspend fun resetToDefaultSeedData() {
         dao.clearAllTransactions()
         dao.clearAllCommitments()
-        getPrimaryPrefs()?.edit()?.remove("backup_snapshot_json")?.apply()
+        getPrimaryPrefs()?.edit()
+            ?.remove("backup_snapshot_json")
+            ?.remove("imported_sms_dedupe_v2")
+            ?.remove("card_balances_v2_json")
+            ?.putBoolean("has_real_bank_sms", false)
+            ?.apply()
         getSecondaryPrefs()?.edit()?.remove("backup_snapshot_json")?.apply()
         dao.saveSettings(
             AppSettingsEntity(
