@@ -9,6 +9,7 @@ import com.example.data.local.OrosiDao
 import com.example.data.local.TransactionEntity
 import com.example.domain.BankSmsParserEngine
 import com.example.domain.JalaliCalendarUtils
+import com.example.domain.JibemanSmsEngine
 import com.example.domain.ParsedSmsResult
 import com.example.domain.ParsedVoiceExpense
 import com.example.domain.PersianNumberUtils
@@ -26,6 +27,7 @@ class OrosiFinanceRepository(
 ) {
 
     companion object {
+        const val PREFS_NAME = "orosi_offline_db_v3_jibeman"
         private val smsSyncMutex = Mutex()
 
         private val demoStoreNames = setOf(
@@ -42,6 +44,12 @@ class OrosiFinanceRepository(
             "انتقال بین بانکی خودی (بلو به ملت)",
             "واریز حقوق آبان‌ماه (آغاز ماه حقوقی)"
         )
+
+        private val demoCommitmentSayyadIds = setOf(
+            "۴۰۳۸۱۲۹۴۰۱۸۲۷۳۶۴",
+            "۴۰۳۹۵۵۱۸۲۷۳۶۴۹۱۰",
+            "قرارداد ۹۹۸۲۱۴"
+        )
     }
 
     val transactionsFlow: Flow<List<TransactionEntity>> = dao.observeTransactions()
@@ -49,26 +57,37 @@ class OrosiFinanceRepository(
     val settingsFlow: Flow<AppSettingsEntity?> = dao.observeSettings()
 
     private fun getPrimaryPrefs() =
-        appContext?.getSharedPreferences("orosi_offline_db", Context.MODE_PRIVATE)
-
-    private fun getSecondaryPrefs() =
-        appContext?.getSharedPreferences("orosi_ offline_db", Context.MODE_PRIVATE)
+        appContext?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     private suspend fun persistSnapshotToSharedPrefs() {
         if (appContext == null) return
         try {
             val json = exportBackupJson()
             getPrimaryPrefs()?.edit()?.putString("backup_snapshot_json", json)?.apply()
-            getSecondaryPrefs()?.edit()?.putString("backup_snapshot_json", json)?.apply()
         } catch (_: Exception) {
         }
     }
 
     private fun isDemoTransaction(tx: TransactionEntity): Boolean {
         if (tx.storeName in demoStoreNames || tx.title in demoTitles) return true
-        // Also detect legacy seed/fallback items with hardcoded "جمعه ۱ آبان" or "پنجشنبه ۳۰ مهر"
+        // Also purge any old false-positive non-bank items where shortBankName was generic "بانک"
+        if (tx.cardInfo == "کارت بانک" && (tx.storeName.contains("دیجی") || tx.storeName.contains("تپسی") || tx.storeName.contains("اسنپ"))) {
+            return true
+        }
         if ((tx.weekdayDate == "جمعه ۱ آبان" || tx.weekdayDate == "پنجشنبه ۳۰ مهر" || tx.weekdayDate == "چهارشنبه ۲۹ مهر" || tx.weekdayDate == "سه‌شنبه ۲۸ مهر") &&
             tx.totalAmountToman in setOf(350_000L, 420_000L, 195_000L, 1_200_000L, 5_000_000L, 42_000_000L, 165_000L, 280_000L)
+        ) {
+            return true
+        }
+        return false
+    }
+
+    private fun isDemoCommitment(c: CommitmentEntity): Boolean {
+        if (c.sayyadId in demoCommitmentSayyadIds) return true
+        if (c.counterparty.contains("محمدرضا کاظمی") ||
+            c.counterparty.contains("شرکت پارس‌نگار") ||
+            c.title == "دنگ شام رستوران سنتی نایب" ||
+            c.title == "قسط وام تسهیلات بانک ملت"
         ) {
             return true
         }
@@ -79,14 +98,13 @@ class OrosiFinanceRepository(
         val currentSettings = dao.getSettingsNow()
         val existingTx = dao.getAllTransactionsNow()
 
-        // 1. If Room DB is empty on startup, check SharedPreferences snapshot first
+        // 1. If Room DB is empty on startup, check v3_jibeman SharedPreferences snapshot first
         if (currentSettings == null && existingTx.isEmpty() && appContext != null) {
             val savedJson = getPrimaryPrefs()?.getString("backup_snapshot_json", null)
-                ?: getSecondaryPrefs()?.getString("backup_snapshot_json", null)
             if (!savedJson.isNullOrBlank()) {
                 val restored = importBackupJsonInternal(savedJson, persistToPrefs = false)
                 if (restored) {
-                    cleanupDuplicatesAndFakeDatesInDb()
+                    cleanupDemoAndDuplicatesIfRealSmsPresent()
                     recalculateRealSafeToSpend()
                     return
                 }
@@ -198,12 +216,10 @@ class OrosiFinanceRepository(
                     )
                 )
             )
-        } else {
-            cleanupDuplicatesAndFakeDatesInDb()
         }
 
         val existingCommitments = dao.getAllCommitmentsNow()
-        if (existingCommitments.isEmpty()) {
+        if (existingCommitments.isEmpty() && !hasRealSmsOnDevice) {
             val now = System.currentTimeMillis()
             dao.insertCommitments(
                 listOf(
@@ -255,65 +271,42 @@ class OrosiFinanceRepository(
             )
         }
 
+        cleanupDemoAndDuplicatesIfRealSmsPresent()
         recalculateRealSafeToSpend()
         persistSnapshotToSharedPrefs()
     }
 
-    /**
-     * Cleans up any existing duplicate transactions or legacy hardcoded "جمعه ۱ آبان" / "۱۸:۱۰" dates
-     * that were stored in the database on previous versions.
-     */
-    private suspend fun cleanupDuplicatesAndFakeDatesInDb() {
+    private suspend fun cleanupDemoAndDuplicatesIfRealSmsPresent() {
+        val hasRealSms = getPrimaryPrefs()?.getBoolean("has_real_bank_sms", false) == true
         val allTxs = dao.getAllTransactionsNow()
-        if (allTxs.isEmpty()) return
 
-        val hasRealSms = getPrimaryPrefs()?.getBoolean("has_real_bank_sms", false) == true ||
-            allTxs.any { !isDemoTransaction(it) }
-
-        val seenSignatures = mutableSetOf<String>()
-        for (tx in allTxs.sortedBy { it.id }) {
-            // 1. If real bank SMS exist on device, purge all demo/sample transactions automatically
-            if (hasRealSms && isDemoTransaction(tx)) {
-                dao.deleteTransactionById(tx.id)
-                continue
+        if (hasRealSms) {
+            // Remove all demo transactions
+            allTxs.filter { isDemoTransaction(it) }.forEach { demoTx ->
+                dao.deleteTransactionById(demoTx.id)
             }
-
-            // 2. Strict deduplication by (timestampMillis / 60000, amountToman, isDeposit)
-            val minuteBucket = tx.timestamp / 60_000L
-            val isDeposit = tx.type == "INCOME"
-            val signature = "sig_${minuteBucket}_${tx.totalAmountToman}_$isDeposit"
-            if (!seenSignatures.add(signature)) {
-                dao.deleteTransactionById(tx.id)
-                continue
-            }
-
-            // 3. Fix any transaction that had fake "جمعه ۱ آبان" or "۱۸:۱۰" fallback dates
-            if (tx.weekdayDate == "جمعه ۱ آبان" && tx.timeStr == "۱۸:۱۰" && tx.timestamp > 0L) {
-                val realJalali = JalaliCalendarUtils.fromTimestamp(tx.timestamp)
-                dao.updateTransaction(
-                    tx.copy(
-                        weekdayDate = realJalali.weekdayDate,
-                        timeStr = realJalali.timeStr
-                    )
-                )
+            // Remove all hardcoded fake demo commitments ("محمدرضا کاظمی", etc.)
+            val allCommitments = dao.getAllCommitmentsNow()
+            allCommitments.filter { isDemoCommitment(it) }.forEach { demoC ->
+                dao.deleteCommitmentById(demoC.id)
             }
         }
     }
 
-    private fun saveExtractedCardBalance(cardKey: String, balanceToman: Long, smsTimestamp: Long) {
+    private fun saveExtractedCardBalance(bankKey: String, balanceToman: Long, smsTimestamp: Long) {
         val prefs = getPrimaryPrefs() ?: return
         try {
-            val rawJson = prefs.getString("card_balances_v2_json", "{}") ?: "{}"
+            val rawJson = prefs.getString("card_balances_v3_json", "{}") ?: "{}"
             val obj = JSONObject(rawJson)
-            val existingObj = obj.optJSONObject(cardKey)
+            val existingObj = obj.optJSONObject(bankKey)
             val prevTimestamp = existingObj?.optLong("ts", 0L) ?: 0L
             if (smsTimestamp >= prevTimestamp) {
                 val entry = JSONObject().apply {
                     put("balanceToman", balanceToman)
                     put("ts", smsTimestamp)
                 }
-                obj.put(cardKey, entry)
-                prefs.edit().putString("card_balances_v2_json", obj.toString()).apply()
+                obj.put(bankKey, entry)
+                prefs.edit().putString("card_balances_v3_json", obj.toString()).apply()
             }
         } catch (_: Exception) {
         }
@@ -322,7 +315,7 @@ class OrosiFinanceRepository(
     fun getTotalExtractedCardBalanceToman(): Long {
         val prefs = getPrimaryPrefs() ?: return 0L
         return try {
-            val rawJson = prefs.getString("card_balances_v2_json", "{}") ?: "{}"
+            val rawJson = prefs.getString("card_balances_v3_json", "{}") ?: "{}"
             val obj = JSONObject(rawJson)
             var sum = 0L
             val keys = obj.keys()
@@ -342,8 +335,8 @@ class OrosiFinanceRepository(
     /**
      * Dynamically recalculates `monthlyBalanceToman` and `dailySafeBudgetToman` ("سهم خرج امروزت")
      * from the user's actual latest extracted bank card balances (`مانده`) or deposits minus expenses,
-     * minus unpaid commitments, divided by remaining days in the payday cycle.
-     * Guarantees it NEVER falsely shows 0 Toman when the user has money in their account.
+     * minus unpaid commitments, divided by remaining days in the payday cycle,
+     * and rounds `dailySafeToSpend` down to clean thousands (`(raw / 1000L) * 1000L`).
      */
     suspend fun recalculateRealSafeToSpend() {
         val currentSettings = dao.getSettingsNow() ?: AppSettingsEntity()
@@ -363,10 +356,6 @@ class OrosiFinanceRepository(
             .filter { !it.isSettled && (it.category == "SAYYAD_ISSUED" || it.category == "LOAN_INSTALLMENT") }
             .sumOf { it.amountToman }
 
-        // Determine actual liquid account balance:
-        // 1. Prefer real extracted `مانده` from the latest bank SMS of each card
-        // 2. Otherwise use deposits minus expenses if positive
-        // 3. Otherwise keep a positive floor so it never falsely drops to 0 Toman
         val rawAccountBalanceToman: Long = when {
             extractedBalanceSum > 0L -> extractedBalanceSum
             totalDeposits > totalExpenses -> totalDeposits - totalExpenses
@@ -374,8 +363,6 @@ class OrosiFinanceRepository(
             else -> 18_450_000L
         }
 
-        // Subtract unpaid commitments only if rawAccountBalanceToman exceeds unpaidCommitments
-        // (so demo commitments or end-of-month commitments funded by future salary never zero out positive cash on hand)
         val freeMonthlyBalance = if (rawAccountBalanceToman > unpaidCommitments) {
             rawAccountBalanceToman - unpaidCommitments
         } else {
@@ -386,7 +373,7 @@ class OrosiFinanceRepository(
             .calculateRemainingDaysToPayday(currentSettings.paydayStartDay)
             .coerceIn(1, 30)
 
-        val calculatedDailySafe = if (freeMonthlyBalance > 0L) {
+        val rawDailySafe = if (freeMonthlyBalance > 0L) {
             (freeMonthlyBalance / remainingDays.toLong()).coerceAtLeast(
                 (rawAccountBalanceToman / 30L).coerceAtLeast(25_000L)
             )
@@ -394,141 +381,127 @@ class OrosiFinanceRepository(
             680_000L
         }
 
+        // Round down to clean thousands: (raw / 1000L) * 1000L
+        val roundedDailySafe = PersianNumberUtils.roundDownToCleanThousands(rawDailySafe)
+            .coerceAtLeast(if (rawDailySafe > 0L) 1_000L else 0L)
+
         dao.saveSettings(
             currentSettings.copy(
                 monthlyBalanceToman = freeMonthlyBalance.coerceAtLeast(rawAccountBalanceToman),
-                dailySafeBudgetToman = calculatedDailySafe
+                dailySafeBudgetToman = roundedDailySafe
             )
         )
     }
 
+    /**
+     * Processes an incoming SMS from `BankSmsBroadcastReceiver` using `JibemanSmsEngine`:
+     * 1. Check `val bankProfile = JibemanSmsEngine.resolveBank(senderAddress)`. If null, reject.
+     * 2. Call `val parsed = JibemanSmsEngine.parse(body) ?: return null`.
+     * 3. Convert Rial to Toman (`parsed.amount / 10L` and `parsed.balance?.div(10L)`).
+     * 4. Set `isDeposit = (parsed.direction == "in")` and `bankName = bankProfile.nameFa`.
+     * 5. Deduplicate using `JibemanSmsEngine.dedupKey(senderAddress, timestampMillis, body)`.
+     */
     suspend fun processIncomingBankSms(
         rawSms: String,
         timestampMillis: Long = System.currentTimeMillis(),
-        senderAddress: String = "",
-        smsId: Long? = null
-    ): ParsedSmsResult = smsSyncMutex.withLock {
-        val parsed = BankSmsParserEngine.parseBankSms(
-            rawSms = rawSms,
-            timestampMillis = timestampMillis,
-            senderAddress = senderAddress
-        )
-        if (!parsed.isValidFinancialSms || parsed.isMicroFee || parsed.amountToman <= 0L) {
-            return parsed
-        }
+        senderAddress: String = ""
+    ): ParsedSmsResult? = smsSyncMutex.withLock {
+        val bankProfile = JibemanSmsEngine.resolveBank(senderAddress) ?: return null
+        val parsed = JibemanSmsEngine.parse(rawSms) ?: return null
+
+        val amountToman = parsed.amount / 10L
+        if (amountToman <= 0L) return null
+
+        val balanceToman = parsed.balance?.div(10L)
+        val isDeposit = (parsed.direction == "in")
+        val bankName = bankProfile.nameFa
+        val uniqueDedupKey = JibemanSmsEngine.dedupKey(senderAddress, timestampMillis, rawSms)
+
+        val fullResult = BankSmsParserEngine.parseWithJibemanEngine(
+            senderAddress = senderAddress,
+            body = rawSms,
+            timestampMillis = timestampMillis
+        ) ?: return null
 
         val prefs = getPrimaryPrefs()
-        val importedKeys = prefs?.getStringSet("imported_sms_dedupe_v2", emptySet())?.toMutableSet()
+        val importedKeys = prefs?.getStringSet("jibeman_dedup_keys", emptySet())?.toMutableSet()
             ?: mutableSetOf()
 
-        val minuteBucket = timestampMillis / 60_000L
-        val sigKey = "sig_${minuteBucket}_${parsed.amountToman}_${parsed.isIncome}"
-        val idKey = smsId?.let { "sms_id_$it" }
-
-        if ((idKey != null && importedKeys.contains(idKey)) || importedKeys.contains(sigKey)) {
-            return parsed
+        if (importedKeys.contains(uniqueDedupKey)) {
+            return fullResult
         }
 
-        // Also check existing Room DB rows to prevent any duplicate
-        val existingTxs = dao.getAllTransactionsNow()
-        val alreadyInDb = existingTxs.any { tx ->
-            (tx.timestamp / 60_000L == minuteBucket || kotlin.math.abs(tx.timestamp - timestampMillis) < 60_000L) &&
-                tx.totalAmountToman == parsed.amountToman &&
-                (tx.type == "INCOME") == parsed.isIncome
-        }
-        if (alreadyInDb) {
-            if (idKey != null) importedKeys.add(idKey)
-            importedKeys.add(sigKey)
-            prefs?.edit()?.putStringSet("imported_sms_dedupe_v2", importedKeys)?.apply()
-            return parsed
-        }
-
-        // Mark real SMS mode & purge demo transactions if any exist
+        // Mark real SMS mode & purge demo transactions and fake demo commitments
         prefs?.edit()?.putBoolean("has_real_bank_sms", true)?.apply()
-        existingTxs.filter { isDemoTransaction(it) }.forEach { demoTx ->
-            dao.deleteTransactionById(demoTx.id)
+        cleanupDemoAndDuplicatesIfRealSmsPresent()
+
+        // Save latest extracted balance for this bank
+        if (balanceToman != null && balanceToman >= 0L) {
+            saveExtractedCardBalance(bankName, balanceToman, timestampMillis)
         }
 
-        // Update extracted card balance if present
-        if (parsed.extractedBalanceToman != null && parsed.extractedBalanceToman >= 0L) {
-            saveExtractedCardBalance(parsed.cardLabel, parsed.extractedBalanceToman, timestampMillis)
-        }
+        if (!fullResult.isMicroFee) {
+            val txType = when {
+                fullResult.isSelfTransfer -> "SELF_TRANSFER"
+                isDeposit -> "INCOME"
+                else -> "EXPENSE"
+            }
+            val userShare = if (fullResult.isSelfTransfer) 0L else amountToman
 
-        val txType = when {
-            parsed.isSelfTransfer -> "SELF_TRANSFER"
-            parsed.isIncome -> "INCOME"
-            else -> "EXPENSE"
-        }
-
-        val userShare = if (parsed.isSelfTransfer) 0L else parsed.amountToman
-        dao.insertTransaction(
-            TransactionEntity(
-                title = parsed.detectedTitle,
-                storeName = parsed.detectedStore,
-                purpose = parsed.detectedPurpose,
-                totalAmountToman = parsed.amountToman,
-                userShareToman = userShare,
-                weekdayDate = parsed.weekdayDate,
-                timeStr = parsed.timeStr,
-                cardInfo = parsed.cardLabel,
-                type = txType,
-                isUntagged = parsed.isUntaggedPurchase,
-                timestamp = timestampMillis
+            dao.insertTransaction(
+                TransactionEntity(
+                    title = fullResult.detectedTitle,
+                    storeName = fullResult.detectedStore,
+                    purpose = fullResult.detectedPurpose,
+                    totalAmountToman = amountToman,
+                    userShareToman = userShare,
+                    weekdayDate = fullResult.weekdayDate,
+                    timeStr = fullResult.timeStr,
+                    cardInfo = fullResult.cardLabel,
+                    type = txType,
+                    isUntagged = fullResult.isUntaggedPurchase,
+                    timestamp = timestampMillis
+                )
             )
-        )
+        }
 
-        if (idKey != null) importedKeys.add(idKey)
-        importedKeys.add(sigKey)
-        prefs?.edit()?.putStringSet("imported_sms_dedupe_v2", importedKeys)?.apply()
+        importedKeys.add(uniqueDedupKey)
+        prefs?.edit()?.putStringSet("jibeman_dedup_keys", importedKeys)?.apply()
 
-        if (parsed.isSalaryDeposit) {
+        if (fullResult.isSalaryDeposit) {
             val currentSettings = dao.getSettingsNow() ?: AppSettingsEntity()
             dao.saveSettings(
                 currentSettings.copy(
-                    paydayCycleLabel = "${parsed.weekdayDate} تا ۳۰ روز بعد (تشخیص خودکار حقوق)"
+                    paydayCycleLabel = "${fullResult.weekdayDate} تا ۳۰ روز بعد (تشخیص خودکار حقوق)"
                 )
             )
         }
 
         recalculateRealSafeToSpend()
         persistSnapshotToSharedPrefs()
-        return parsed
+        return fullResult
     }
 
     /**
-     * 100% Automatic, Zero-Click Background SMS Scanner.
-     * Queries Android's Telephony.Sms.Inbox.CONTENT_URI (and Telephony.Sms.CONTENT_URI),
-     * filters real Iranian bank financial SMS messages across all banks,
-     * auto-purges demo transactions as soon as real bank SMS are detected,
-     * strictly deduplicates by ("sms_id_$smsId") AND (timestampMillis / 60000, amountToman, isDeposit),
-     * converts actual SMS timestamp to Asia/Tehran Jalali weekday/date/time,
-     * and extracts real account balance (`مانده`) for accurate Safe-to-Spend calculation.
+     * Scans `Telephony.Sms.Inbox` using `JibemanSmsEngine`:
+     * 1. Check `val bankProfile = JibemanSmsEngine.resolveBank(senderAddress)`. If null, reject immediately.
+     * 2. Call `val parsed = JibemanSmsEngine.parse(body) ?: continue`.
+     * 3. Convert Rial to Toman (`parsed.amount / 10L` and `parsed.balance?.div(10L)`).
+     * 4. Set `isDeposit = (parsed.direction == "in")` and `bankName = bankProfile.nameFa`.
+     * 5. Use `JibemanSmsEngine.dedupKey(senderAddress, timestampMillis, body)` as the unique transaction ID.
      */
     suspend fun scanDeviceSmsInboxLast30Days(
         context: Context,
         daysBack: Int = 60
     ): Int = withContext(Dispatchers.IO) {
         smsSyncMutex.withLock {
-            val prefs = context.getSharedPreferences("orosi_offline_db", Context.MODE_PRIVATE)
-            val importedKeys = prefs.getStringSet("imported_sms_dedupe_v2", emptySet())?.toMutableSet()
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val importedKeys = prefs.getStringSet("jibeman_dedup_keys", emptySet())?.toMutableSet()
                 ?: mutableSetOf()
-
-            // First clean up any pre-existing duplicates in Room DB
-            cleanupDuplicatesAndFakeDatesInDb()
 
             var importedCount = 0
             var foundAnyRealBankSms = false
             val cutoffMillis = System.currentTimeMillis() - (daysBack.toLong() * 24L * 60L * 60L * 1000L)
-
-            val existingTxs = dao.getAllTransactionsNow().toMutableList()
-            val seenSignaturesInScan = mutableSetOf<String>()
-            existingTxs.forEach { tx ->
-                if (!isDemoTransaction(tx)) {
-                    val bucket = tx.timestamp / 60_000L
-                    val isDep = tx.type == "INCOME"
-                    seenSignaturesInScan.add("sig_${bucket}_${tx.totalAmountToman}_$isDep")
-                }
-            }
 
             try {
                 val projection = arrayOf(
@@ -539,7 +512,7 @@ class OrosiFinanceRepository(
                 )
                 val selection = "${Telephony.Sms.DATE} >= ?"
                 val selectionArgs = arrayOf(cutoffMillis.toString())
-                val sortOrder = "${Telephony.Sms.DATE} DESC LIMIT 400"
+                val sortOrder = "${Telephony.Sms.DATE} DESC LIMIT 500"
 
                 val cursor = context.contentResolver.query(
                     Telephony.Sms.Inbox.CONTENT_URI,
@@ -556,76 +529,82 @@ class OrosiFinanceRepository(
                 )
 
                 cursor?.use { c ->
-                    val idIdx = c.getColumnIndex(Telephony.Sms._ID)
                     val addrIdx = c.getColumnIndex(Telephony.Sms.ADDRESS)
                     val bodyIdx = c.getColumnIndex(Telephony.Sms.BODY)
                     val dateIdx = c.getColumnIndex(Telephony.Sms.DATE)
 
                     while (c.moveToNext()) {
-                        val smsId = if (idIdx >= 0) c.getLong(idIdx) else -1L
-                        val sender = if (addrIdx >= 0) c.getString(addrIdx).orEmpty().trim() else ""
+                        val senderAddress = if (addrIdx >= 0) c.getString(addrIdx).orEmpty().trim() else ""
                         val body = if (bodyIdx >= 0) c.getString(bodyIdx).orEmpty().trim() else ""
-                        val dateMillis = if (dateIdx >= 0) c.getLong(dateIdx) else System.currentTimeMillis()
+                        val timestampMillis = if (dateIdx >= 0) c.getLong(dateIdx) else System.currentTimeMillis()
 
-                        if (body.isBlank()) continue
-                        if (BankSmsParserEngine.isOtpOrNonFinancial(body)) continue
+                        if (senderAddress.isBlank() || body.isBlank()) continue
 
-                        val parsed = BankSmsParserEngine.parseBankSms(
-                            rawSms = body,
-                            timestampMillis = dateMillis,
-                            senderAddress = sender
-                        )
-                        if (!parsed.isValidFinancialSms || parsed.amountToman <= 0L) continue
+                        // Step 1: Resolve bank strictly from senderAddress via JibemanSmsEngine
+                        // Rejects Digikala, Tapsi, Snapp, and all promo SMS 100%
+                        val bankProfile = JibemanSmsEngine.resolveBank(senderAddress) ?: continue
+
+                        // Step 2: Parse SMS body via JibemanSmsEngine
+                        val parsed = JibemanSmsEngine.parse(body) ?: continue
+
+                        // Step 3: Convert Rial to Toman by dividing by 10
+                        val amountToman = parsed.amount / 10L
+                        if (amountToman <= 0L) continue
+                        val balanceToman = parsed.balance?.div(10L)
+
+                        // Step 4: Direction & Bank Name
+                        val isDeposit = (parsed.direction == "in")
+                        val bankName = bankProfile.nameFa
+
+                        // Step 5: Exact Jibeman SHA-256 deduplication key
+                        val uniqueDedupKey = JibemanSmsEngine.dedupKey(senderAddress, timestampMillis, body)
 
                         foundAnyRealBankSms = true
 
-                        // Always record latest extracted balance (`مانده`) even if transaction was already imported
-                        if (parsed.extractedBalanceToman != null && parsed.extractedBalanceToman >= 0L) {
-                            saveExtractedCardBalance(parsed.cardLabel, parsed.extractedBalanceToman, dateMillis)
+                        // Always record latest extracted balance (`مانده`) per bank
+                        if (balanceToman != null && balanceToman >= 0L) {
+                            saveExtractedCardBalance(bankName, balanceToman, timestampMillis)
                         }
 
-                        if (parsed.isMicroFee) continue
+                        if (importedKeys.contains(uniqueDedupKey)) {
+                            continue
+                        }
 
-                        val idKey = if (smsId >= 0L) "sms_id_$smsId" else null
-                        val minuteBucket = dateMillis / 60_000L
-                        val sigKey = "sig_${minuteBucket}_${parsed.amountToman}_${parsed.isIncome}"
+                        val fullResult = BankSmsParserEngine.parseWithJibemanEngine(
+                            senderAddress = senderAddress,
+                            body = body,
+                            timestampMillis = timestampMillis
+                        ) ?: continue
 
-                        // Strict deduplication check: neither sms_id nor minute-bucket signature may repeat
-                        if ((idKey != null && importedKeys.contains(idKey)) ||
-                            importedKeys.contains(sigKey) ||
-                            seenSignaturesInScan.contains(sigKey)
-                        ) {
-                            if (idKey != null) importedKeys.add(idKey)
-                            importedKeys.add(sigKey)
+                        if (fullResult.isMicroFee) {
+                            importedKeys.add(uniqueDedupKey)
                             continue
                         }
 
                         val txType = when {
-                            parsed.isSelfTransfer -> "SELF_TRANSFER"
-                            parsed.isIncome -> "INCOME"
+                            fullResult.isSelfTransfer -> "SELF_TRANSFER"
+                            isDeposit -> "INCOME"
                             else -> "EXPENSE"
                         }
-                        val userShare = if (parsed.isSelfTransfer) 0L else parsed.amountToman
+                        val userShare = if (fullResult.isSelfTransfer) 0L else amountToman
 
                         dao.insertTransaction(
                             TransactionEntity(
-                                title = parsed.detectedTitle,
-                                storeName = parsed.detectedStore,
-                                purpose = parsed.detectedPurpose,
-                                totalAmountToman = parsed.amountToman,
+                                title = fullResult.detectedTitle,
+                                storeName = fullResult.detectedStore,
+                                purpose = fullResult.detectedPurpose,
+                                totalAmountToman = amountToman,
                                 userShareToman = userShare,
-                                weekdayDate = parsed.weekdayDate,
-                                timeStr = parsed.timeStr,
-                                cardInfo = parsed.cardLabel,
+                                weekdayDate = fullResult.weekdayDate,
+                                timeStr = fullResult.timeStr,
+                                cardInfo = fullResult.cardLabel,
                                 type = txType,
-                                isUntagged = parsed.isUntaggedPurchase,
-                                timestamp = dateMillis
+                                isUntagged = fullResult.isUntaggedPurchase,
+                                timestamp = timestampMillis
                             )
                         )
 
-                        if (idKey != null) importedKeys.add(idKey)
-                        importedKeys.add(sigKey)
-                        seenSignaturesInScan.add(sigKey)
+                        importedKeys.add(uniqueDedupKey)
                         importedCount++
                     }
                 }
@@ -634,16 +613,13 @@ class OrosiFinanceRepository(
             } catch (_: Exception) {
             }
 
-            // Auto-purge all hardcoded demo/sample transactions as soon as real bank SMS are detected!
+            // When real bank SMS exist on the phone, wipe all demo transactions and fake demo commitments
             if (foundAnyRealBankSms) {
                 prefs.edit().putBoolean("has_real_bank_sms", true).apply()
-                val currentAll = dao.getAllTransactionsNow()
-                currentAll.filter { isDemoTransaction(it) }.forEach { demoTx ->
-                    dao.deleteTransactionById(demoTx.id)
-                }
+                cleanupDemoAndDuplicatesIfRealSmsPresent()
             }
 
-            prefs.edit().putStringSet("imported_sms_dedupe_v2", importedKeys).apply()
+            prefs.edit().putStringSet("jibeman_dedup_keys", importedKeys).apply()
             recalculateRealSafeToSpend()
             persistSnapshotToSharedPrefs()
             importedCount
@@ -651,23 +627,23 @@ class OrosiFinanceRepository(
     }
 
     /**
-     * Triggered when user taps "پاکسازی و بازخوانی تمیز پیامک‌های واقعی" in the status modal.
-     * Purges all transactions and dedupe caches and cleanly re-imports only real bank SMS from the phone.
+     * Triggered when user taps "پاکسازی و بازخوانی تمیز پیامک‌های واقعی".
      */
     suspend fun cleanPurgeAndRescanRealSms(context: Context): Int = withContext(Dispatchers.IO) {
         smsSyncMutex.withLock {
-            val prefs = context.getSharedPreferences("orosi_offline_db", Context.MODE_PRIVATE)
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             prefs.edit()
-                .remove("imported_sms_dedupe_v2")
-                .remove("imported_sms_hashes")
-                .remove("card_balances_v2_json")
+                .remove("jibeman_dedup_keys")
+                .remove("card_balances_v3_json")
                 .remove("backup_snapshot_json")
                 .apply()
-            getSecondaryPrefs()?.edit()?.remove("backup_snapshot_json")?.apply()
             dao.clearAllTransactions()
+            // Also remove any fake demo commitments
+            dao.getAllCommitmentsNow().filter { isDemoCommitment(it) }.forEach { demoC ->
+                dao.deleteCommitmentById(demoC.id)
+            }
         }
         val count = scanDeviceSmsInboxLast30Days(context, daysBack = 90)
-        // If running on web preview emulator with 0 real SMS in Telephony provider, restore seed so screen isn't blank
         if (count == 0 && dao.getAllTransactionsNow().isEmpty()) {
             getPrimaryPrefs()?.edit()?.putBoolean("has_real_bank_sms", false)?.apply()
             ensureSeeded()
@@ -769,7 +745,8 @@ class OrosiFinanceRepository(
             )
         }
 
-        val newDaily = (currentSettings.dailySafeBudgetToman - parsedVoice.userShareToman).coerceAtLeast(25_000L)
+        val rawNewDaily = (currentSettings.dailySafeBudgetToman - parsedVoice.userShareToman).coerceAtLeast(25_000L)
+        val newDaily = PersianNumberUtils.roundDownToCleanThousands(rawNewDaily)
         val newMonthly = (currentSettings.monthlyBalanceToman - parsedVoice.userShareToman).coerceAtLeast(25_000L)
         dao.saveSettings(
             currentSettings.copy(
@@ -897,7 +874,7 @@ class OrosiFinanceRepository(
         cardInfo: String,
         purpose: String,
         storeName: String,
-        specialTagMode: String // "NORMAL", "INSTALLMENT", "DONG", "GOLD_SAVE"
+        specialTagMode: String
     ) {
         val cleanStore = storeName.trim().ifEmpty { "فروشگاه" }
         val cleanPurpose = purpose.trim().ifEmpty { "خرید روزمره" }
@@ -991,7 +968,7 @@ class OrosiFinanceRepository(
                 autoDetectSalary = autoDetectSalary,
                 goldPrice18kToman = goldPrice18kToman,
                 goldReserveToman = recalculatedGoldValue,
-                dailySafeBudgetToman = dailySafeBudgetToman
+                dailySafeBudgetToman = PersianNumberUtils.roundDownToCleanThousands(dailySafeBudgetToman)
             )
         )
         persistSnapshotToSharedPrefs()
@@ -1004,10 +981,10 @@ class OrosiFinanceRepository(
 
         val root = JSONObject()
         root.put("app", "OrosiFinance_KhialRahat")
-        root.put("version", 2)
+        root.put("version", 3)
 
         val settingsObj = JSONObject().apply {
-            put("dailySafeBudgetToman", settings.dailySafeBudgetToman)
+            put("dailySafeBudgetToman", PersianNumberUtils.roundDownToCleanThousands(settings.dailySafeBudgetToman))
             put("monthlyBalanceToman", settings.monthlyBalanceToman)
             put("paydayStartDay", settings.paydayStartDay)
             put("paydayCycleLabel", settings.paydayCycleLabel)
@@ -1074,10 +1051,11 @@ class OrosiFinanceRepository(
             val root = JSONObject(jsonString)
             val sObj = root.optJSONObject("settings")
             if (sObj != null) {
+                val rawDaily = sObj.optLong("dailySafeBudgetToman", 680_000L).coerceAtLeast(25_000L)
                 dao.saveSettings(
                     AppSettingsEntity(
                         id = 1,
-                        dailySafeBudgetToman = sObj.optLong("dailySafeBudgetToman", 680_000L).coerceAtLeast(25_000L),
+                        dailySafeBudgetToman = PersianNumberUtils.roundDownToCleanThousands(rawDaily),
                         monthlyBalanceToman = sObj.optLong("monthlyBalanceToman", 18_450_000L).coerceAtLeast(25_000L),
                         paydayStartDay = sObj.optInt("paydayStartDay", 1),
                         paydayCycleLabel = sObj.optString("paydayCycleLabel", "۱ آبان تا ۳۰ آبان"),
@@ -1157,11 +1135,10 @@ class OrosiFinanceRepository(
         dao.clearAllCommitments()
         getPrimaryPrefs()?.edit()
             ?.remove("backup_snapshot_json")
-            ?.remove("imported_sms_dedupe_v2")
-            ?.remove("card_balances_v2_json")
+            ?.remove("jibeman_dedup_keys")
+            ?.remove("card_balances_v3_json")
             ?.putBoolean("has_real_bank_sms", false)
             ?.apply()
-        getSecondaryPrefs()?.edit()?.remove("backup_snapshot_json")?.apply()
         dao.saveSettings(
             AppSettingsEntity(
                 id = 1,

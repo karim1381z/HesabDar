@@ -147,7 +147,7 @@ abstract class OrosiDatabase : RoomDatabase() {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     OrosiDatabase::class.java,
-                    "orosi_finance_offline.db"
+                    "orosi_finance_v3_jibeman.db"
                 ).fallbackToDestructiveMigration().build()
                 INSTANCE = instance
                 instance

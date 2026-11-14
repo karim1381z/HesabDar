@@ -40,6 +40,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -49,7 +50,9 @@ import com.example.ui.theme.AlabasterSilk
 import com.example.ui.theme.NishapurTurquoiseBright
 import com.example.ui.theme.NishapurTurquoiseDeep
 import com.example.ui.theme.NishapurTurquoiseSoft
+import com.example.ui.theme.OrosiHairline
 import com.example.ui.theme.OrosiOnSurfaceVariant
+import com.example.ui.theme.OrosiSurfaceContainer
 import com.example.ui.theme.OrosiSurfaceHigh
 import com.example.ui.theme.RoyalAmethyst
 import com.example.ui.theme.RoyalAmethystContainer
@@ -104,7 +107,36 @@ fun CommitmentsScreen(
             }
         }
 
-        // 2. Purple Sayyad Cheque Hero Card (۱۵,۰۰۰,۰۰۰ تومان)
+        // Empty state when real SMS wiped fake demo commitments and user hasn't added any yet
+        if (commitments.isEmpty()) {
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(OrosiSurfaceContainer)
+                        .border(1.dp, OrosiHairline, RoundedCornerShape(20.dp))
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "هیچ چک یا قسط فعالی ثبت نشده است",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = AlabasterSilk,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "برای مدیریت چک‌های صیادی، اقساط وام یا دُنگ‌های خود، از دکمه زیر استفاده کنید.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = OrosiOnSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        }
+
+        // 2. Purple Sayyad Cheque Hero Card
         if (issuedCheque != null) {
             item {
                 SpaciousPurpleSayyadCard(
@@ -189,25 +221,32 @@ private fun SpaciousPurpleSayyadCard(
             .testTag("purple_sayyad_cheque_card")
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            // Top Row: Title with weight(1f) + maxLines = 1 + TextOverflow.Ellipsis + 12.dp spacing + Badge
+            // Title allowed to wrap up to maxLines = 2 (14.sp) on its own full-width row so it is never cut off with "..."
+            Text(
+                text = cheque.title,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    lineHeight = 22.sp
+                ),
+                color = AlabasterSilk,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Due-date badge on its own dedicated row
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
+                horizontalArrangement = Arrangement.Start
             ) {
-                Text(
-                    text = cheque.title,
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = AlabasterSilk,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
-                )
-                Spacer(modifier = Modifier.width(12.dp))
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(50))
                         .background(Color.White.copy(alpha = 0.14f))
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                        .padding(horizontal = 12.dp, vertical = 5.dp)
                 ) {
                     Text(
                         text = cheque.dueDateStr,
@@ -219,7 +258,7 @@ private fun SpaciousPurpleSayyadCard(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
             Text(
                 text = PersianNumberUtils.formatToman(cheque.amountToman, showUnit = true),
@@ -233,13 +272,13 @@ private fun SpaciousPurpleSayyadCard(
                 modifier = Modifier.testTag("sayyad_hero_amount")
             )
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             Text(
                 text = if (cheque.isSettled) "پاس شد / تسویه شد ✓" else cheque.counterparty,
                 style = MaterialTheme.typography.bodySmall,
                 color = if (cheque.isSettled) NishapurTurquoiseSoft else RoyalAmethystSoft,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
         }
@@ -253,64 +292,101 @@ private fun SpaciousCommitmentCard(
     icon: ImageVector,
     onClick: () -> Unit
 ) {
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(20.dp))
             .background(OrosiSurfaceHigh)
             .border(1.dp, accentColor.copy(alpha = 0.30f), RoundedCornerShape(20.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 18.dp, vertical = 18.dp)
-            .testTag("commitment_card_${commitment.id}"),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
+            .padding(horizontal = 18.dp, vertical = 16.dp)
+            .testTag("commitment_card_${commitment.id}")
     ) {
         Row(
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.weight(1f)
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(accentColor.copy(alpha = 0.15f))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
             ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = commitment.title,
-                    tint = accentColor,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
-            Spacer(modifier = Modifier.width(14.dp))
-            Column(modifier = Modifier.weight(1f)) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(accentColor.copy(alpha = 0.15f))
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = commitment.title,
+                        tint = accentColor,
+                        modifier = Modifier.size(21.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
                 Text(
                     text = commitment.title,
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        lineHeight = 21.sp
+                    ),
                     color = AlabasterSilk,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
                 )
-                Spacer(modifier = Modifier.height(4.dp))
+            }
+
+            Spacer(modifier = Modifier.width(10.dp))
+
+            Text(
+                text = PersianNumberUtils.formatToman(commitment.amountToman, showUnit = true),
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
+                ),
+                color = accentColor,
+                maxLines = 1,
+                softWrap = false
+            )
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Due-date badge placed on its own row so title text is never truncated
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(accentColor.copy(alpha = 0.12f))
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
+            ) {
                 Text(
                     text = if (commitment.isSettled) "پاس شد / تسویه شد ✓" else commitment.dueDateStr,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (commitment.isSettled) NishapurTurquoiseBright else OrosiOnSurfaceVariant,
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                    color = if (commitment.isSettled) NishapurTurquoiseBright else accentColor,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+
+            if (commitment.counterparty.isNotBlank()) {
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = commitment.counterparty,
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.5.sp),
+                    color = OrosiOnSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
         }
-
-        Spacer(modifier = Modifier.width(12.dp))
-
-        Text(
-            text = PersianNumberUtils.formatToman(commitment.amountToman, showUnit = true),
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-            color = accentColor,
-            maxLines = 1,
-            softWrap = false
-        )
     }
 }

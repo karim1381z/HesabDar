@@ -351,7 +351,9 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val result = repository.processIncomingBankSms(rawSms)
             _showSmsSimulatorModal.value = false
-            showBanner(result.summaryMessage)
+            if (result != null) {
+                showBanner(result.summaryMessage)
+            }
         }
     }
 

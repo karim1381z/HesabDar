@@ -2,74 +2,71 @@ package com.example
 
 import com.example.domain.BankSmsParserEngine
 import com.example.domain.JalaliCalendarUtils
+import com.example.domain.JibemanSmsEngine
 import com.example.domain.PersianNumberUtils
 import com.example.domain.PersianVoiceSlangParserEngine
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ExampleUnitTest {
     @Test
-    fun testSeparateAmountFromMandehBalanceAndRealTimestamp() {
-        // Real Iranian bank SMS containing both transaction amount (17,673,900 Rial = 1,767,390 Toman)
-        // and account balance (مانده: 145,000,000 Rial = 14,500,000 Toman)
+    fun testJibemanResolveBankAndRejectPromoSenders() {
+        // Non-bank senders (Digikala, Tapsi, Snapp, random promo) must be rejected (null)
+        assertNull(JibemanSmsEngine.resolveBank("Digikala"))
+        assertNull(JibemanSmsEngine.resolveBank("TAPSI"))
+        assertNull(JibemanSmsEngine.resolveBank("Snapp"))
+        assertNull(JibemanSmsEngine.resolveBank("10008590"))
+
+        // Real Iranian bank senders must resolve to their exact BankProfile
+        assertEquals("صادرات ایران", JibemanSmsEngine.resolveBank("+9830009419")?.nameFa)
+        assertEquals("ملت", JibemanSmsEngine.resolveBank("Bank Mellat")?.nameFa)
+        assertEquals("ملی ایران", JibemanSmsEngine.resolveBank("+9830009417")?.nameFa)
+        assertEquals("بلو", JibemanSmsEngine.resolveBank("+982187641")?.nameFa)
+        assertEquals("سامان", JibemanSmsEngine.resolveBank("SamanBank")?.nameFa)
+        assertEquals("پاسارگاد", JibemanSmsEngine.resolveBank("B.Pasargad")?.nameFa)
+        assertEquals("ویپاد", JibemanSmsEngine.resolveBank("30009017")?.nameFa)
+    }
+
+    @Test
+    fun testJibemanParseAndRialToTomanAndDedupKey() {
+        val sender = "+9830009419"
         val sms = """
             بانک صادرات ایران
-            کارت ۶۰۳۷*۱۲۳۴
+            برداشت
+            مبلغ: ۱۷,۶۷۳,۹۰۰ ریال
             مانده: ۱۴۵,۰۰۰,۰۰۰ ریال
-            برداشت مبلغ ۱۷,۶۷۳,۹۰۰ ریال
         """.trimIndent()
-        val sampleTimestamp = 1730734200000L // Nov 4, 2024 18:40 Asia/Tehran -> دوشنبه ۱۴ آبان ۱۴۰۳
-        val parsed = BankSmsParserEngine.parseBankSms(
-            rawSms = sms,
-            timestampMillis = sampleTimestamp,
-            senderAddress = "983000"
+        val ts = 1730734200000L
+
+        val result = BankSmsParserEngine.parseWithJibemanEngine(
+            senderAddress = sender,
+            body = sms,
+            timestampMillis = ts
         )
-        assertTrue(parsed.isValidFinancialSms)
-        assertEquals("صادرات", parsed.bankName)
-        assertEquals(1_767_390L, parsed.amountToman)
-        assertEquals(14_500_000L, parsed.extractedBalanceToman)
-        assertEquals("دوشنبه ۱۴ آبان", parsed.weekdayDate)
-        assertEquals(1403, parsed.jalaliYear)
+        assertNotNull(result)
+        result!!
+        assertEquals("صادرات ایران", result.bankName)
+        assertEquals(1_767_390L, result.amountToman)
+        assertEquals(14_500_000L, result.extractedBalanceToman)
+        assertEquals(false, result.isIncome)
+        assertEquals(JibemanSmsEngine.dedupKey(sender, ts, sms), result.dedupKey)
     }
 
     @Test
-    fun testRejectOtpDynamicPasswordSms() {
-        val otpSms = "بانک ملت\nرمز پویا خرید اینترنتی: 482910\nمبلغ: 17,673,900 ریال"
-        val parsed = BankSmsParserEngine.parseBankSms(otpSms)
-        assertFalse(parsed.isValidFinancialSms)
+    fun testJibemanRejectsOtpSms() {
+        val otpSms = "بانک ملت\nرمز پویا: 123456\nمبلغ: 17,673,900"
+        assertNull(JibemanSmsEngine.parse(otpSms))
     }
 
     @Test
-    fun testUnknownBankDefaultsToBankNotBlu() {
-        val genericSms = "موسسه مالی\nبرداشت: ۲,۴۰۰,۰۰۰ ریال\nمانده: ۵۰,۰۰۰,۰۰۰ ریال"
-        val parsed = BankSmsParserEngine.parseBankSms(genericSms)
-        assertEquals("بانک", parsed.bankName)
-        assertEquals(240_000L, parsed.amountToman)
-        assertEquals(5_000_000L, parsed.extractedBalanceToman)
-    }
-
-    @Test
-    fun testAllIranianBanksDetection() {
-        assertEquals("ملت", BankSmsParserEngine.detectIranianBankName("بانک ملت\nبرداشت 100000 ریال"))
-        assertEquals("ملی", BankSmsParserEngine.detectIranianBankName("بانک ملی ایران\nبرداشت"))
-        assertEquals("تجارت", BankSmsParserEngine.detectIranianBankName("بانک تجارت\nواریز"))
-        assertEquals("پاسارگاد", BankSmsParserEngine.detectIranianBankName("بانک پاسارگاد\nبرداشت"))
-        assertEquals("سپه", BankSmsParserEngine.detectIranianBankName("بانک سپه\nبرداشت"))
-        assertEquals("مسکن", BankSmsParserEngine.detectIranianBankName("بانک مسکن\nبرداشت"))
-        assertEquals("رفاه", BankSmsParserEngine.detectIranianBankName("بانک رفاه کارگران"))
-        assertEquals("آینده", BankSmsParserEngine.detectIranianBankName("بانک آینده"))
-        assertEquals("پارسیان", BankSmsParserEngine.detectIranianBankName("بانک پارسیان"))
-        assertEquals("اقتصاد نوین", BankSmsParserEngine.detectIranianBankName("بانک اقتصاد نوین"))
-        assertEquals("مهر ایران", BankSmsParserEngine.detectIranianBankName("بانک قرض الحسنه مهر ایران"))
-        assertEquals("کشاورزی", BankSmsParserEngine.detectIranianBankName("بانک کشاورزی"))
-        assertEquals("سینا", BankSmsParserEngine.detectIranianBankName("بانک سینا"))
-        assertEquals("شهر", BankSmsParserEngine.detectIranianBankName("بانک شهر"))
-        assertEquals("گردشگری", BankSmsParserEngine.detectIranianBankName("بانک گردشگری"))
-        assertEquals("ویپاد", BankSmsParserEngine.detectIranianBankName("ویپاد تراکنش"))
-        assertEquals("آبانک", BankSmsParserEngine.detectIranianBankName("آبانک برداشت"))
-        assertEquals("بلو", BankSmsParserEngine.detectIranianBankName("بلوبانک برداشت"))
+    fun testRoundDownToCleanThousands() {
+        val raw = 1_755_497L
+        val rounded = PersianNumberUtils.roundDownToCleanThousands(raw)
+        assertEquals(1_755_000L, rounded)
+        assertEquals("۱,۷۵۵,۰۰۰ تومان", PersianNumberUtils.formatToman(rounded, showUnit = true))
     }
 
     @Test
@@ -81,7 +78,6 @@ class ExampleUnitTest {
         assertEquals(300_000L, parsed.userShareToman)
         assertEquals("علی", parsed.dongFriendName)
         assertEquals("اسنپ‌مارکت", parsed.storeName)
-        assertEquals("۶۸۰,۰۰۰", PersianNumberUtils.formatToman(680_000L))
     }
 
     @Test

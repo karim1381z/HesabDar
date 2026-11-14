@@ -6,7 +6,7 @@ import android.content.Intent
 import android.provider.Telephony
 import com.example.data.local.OrosiDatabase
 import com.example.data.repository.OrosiFinanceRepository
-import com.example.domain.BankSmsParserEngine
+import com.example.domain.JibemanSmsEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -21,11 +21,18 @@ class BankSmsBroadcastReceiver : BroadcastReceiver() {
         val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
         if (messages.isNullOrEmpty()) return
 
+        val senderAddress = messages.firstOrNull()?.displayOriginatingAddress.orEmpty().trim()
         val fullBody = messages.joinToString(separator = "") { it.displayMessageBody.orEmpty() }.trim()
-        if (fullBody.isBlank()) return
-        if (BankSmsParserEngine.isOtpOrNonFinancial(fullBody)) return
+        if (senderAddress.isBlank() || fullBody.isBlank()) return
 
-        val senderAddress = messages.firstOrNull()?.displayOriginatingAddress.orEmpty()
+        // 1. Resolve bank strictly via JibemanSmsEngine.resolveBank(senderAddress).
+        // If null, reject immediately so Digikala, Tapsi, Snapp, and promo SMS are 100% ignored.
+        val bankProfile = JibemanSmsEngine.resolveBank(senderAddress) ?: return
+
+        // 2. Parse body via JibemanSmsEngine.parse(fullBody). If null, reject.
+        val parsed = JibemanSmsEngine.parse(fullBody) ?: return
+        if (parsed.amount / 10L <= 0L) return
+
         val smsTimestamp = messages.firstOrNull()?.timestampMillis?.takeIf { it > 0L }
             ?: System.currentTimeMillis()
 

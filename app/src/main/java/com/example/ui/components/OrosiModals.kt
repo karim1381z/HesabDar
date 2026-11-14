@@ -466,7 +466,10 @@ fun HeroMathBreakdownBottomSheet(
                     )
                 }
                 Text(
-                    text = PersianNumberUtils.formatToman(settings.dailySafeBudgetToman, showUnit = true),
+                    text = PersianNumberUtils.formatToman(
+                        PersianNumberUtils.roundDownToCleanThousands(settings.dailySafeBudgetToman),
+                        showUnit = true
+                    ),
                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black),
                     color = AlabasterSilk
                 )

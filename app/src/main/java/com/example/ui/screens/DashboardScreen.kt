@@ -215,9 +215,10 @@ private fun CalmRoyalBlueHeroCard(
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // 2) Huge, breathable number in the center: "۶۸۰,۰۰۰ تومان"
+            // 2) Huge, breathable number in the center: rounded down to clean thousands
+            val cleanThousandsBudget = PersianNumberUtils.roundDownToCleanThousands(dailySafeBudgetToman)
             Text(
-                text = PersianNumberUtils.formatToman(dailySafeBudgetToman, showUnit = true),
+                text = PersianNumberUtils.formatToman(cleanThousandsBudget, showUnit = true),
                 style = MaterialTheme.typography.displayLarge.copy(
                     fontWeight = FontWeight.Black,
                     fontSize = 36.sp,
