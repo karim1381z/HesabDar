@@ -75,14 +75,14 @@ class ExampleUnitTest {
         assertFalse(pofak.storeName.contains("اسنپ"))
         assertFalse(pofak.purposeCategory.contains("خرید روزمره"))
 
-        // 2. User says "شارژ ایرانسل" on a 49,500 Toman Sepah transaction
+        // 2. User says "شارژ ایرانسل" on a 49,500 Toman Sepah transaction -> purpose is "شارژ ایرانسل", bank remains "سپه"
         val irancell = PersianVoiceSlangParserEngine.parseVoiceCommand(
             rawSpeech = "شارژ ایرانسل",
             fallbackTotalToman = 49_500L,
             defaultBankName = "سپه"
         )
         assertEquals("شارژ ایرانسل", irancell.purposeCategory)
-        assertEquals("ایرانسل", irancell.storeName)
+        assertEquals("سپه", irancell.storeName)
         assertEquals(49_500L, irancell.totalAmountToman)
 
         // 3. User says "بابت هاست پرداخت کردم"
@@ -104,6 +104,37 @@ class ExampleUnitTest {
         assertEquals(300_000L, parsed.userShareToman)
         assertEquals("علی", parsed.dongFriendName)
         assertEquals("اسنپ‌مارکت", parsed.storeName)
+    }
+
+    @Test
+    fun testSpokenPersianNumbersAndTomanMultiplier() {
+        // 1-999 followed by تومن / تومان without هزار/میلیون = thousands of Tomans (* 1,000L)
+        val p1 = PersianVoiceSlangParserEngine.parseSpokenText("۵۰ تومن نانوایی")
+        assertEquals(50_000L, p1.totalAmountToman)
+        assertEquals("نانوایی", p1.purposeCategory)
+        assertEquals("نقدی / دستی", p1.cardLabel)
+
+        val p2 = PersianVoiceSlangParserEngine.parseSpokenText("۳۰۰ تومن میوه")
+        assertEquals(300_000L, p2.totalAmountToman)
+        assertEquals("نقدی / دستی", p2.storeName)
+
+        val p3 = PersianVoiceSlangParserEngine.parseSpokenText("پنجاه تومن نانوایی")
+        assertEquals(50_000L, p3.totalAmountToman)
+
+        val p4 = PersianVoiceSlangParserEngine.parseSpokenText("یک میلیون و دویست هزار تومان خرید گوشت")
+        assertEquals(1_200_000L, p4.totalAmountToman)
+    }
+
+    @Test
+    fun testExistingBankSmsVoiceTaggingNeverChangesBankAmountOrBankName() {
+        // Even if the user mentions a number while tagging an existing bank SMS, its bank amount and bank name stay locked
+        val tagged = PersianVoiceSlangParserEngine.parseVoiceCommand(
+            rawSpeech = "۵۰ تومن پفک و تنقلات",
+            fallbackTotalToman = 100_000L,
+            defaultBankName = "بلو"
+        )
+        assertEquals(100_000L, tagged.totalAmountToman)
+        assertEquals("بلو", tagged.storeName)
     }
 
     @Test

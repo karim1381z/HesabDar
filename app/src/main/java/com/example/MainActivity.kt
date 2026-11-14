@@ -439,6 +439,7 @@ fun OrosiFinanceApp(
         VoiceOverlayBottomSheet(
             voiceState = uiState.voiceState,
             onSpeechChange = { viewModel.onVoiceSpeechChanged(it) },
+            onManualAmountChange = { viewModel.onVoiceManualAmountChanged(it) },
             onSimulateVoiceRecord = { viewModel.triggerVoiceSimulation(null) },
             onConfirmVoiceEntry = { viewModel.confirmVoiceEntry() },
             onDismiss = { viewModel.dismissVoiceOverlay() }

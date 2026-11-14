@@ -34,15 +34,16 @@ enum class CommitmentTab(val title: String) {
     SAYYAD("چک صیادی"),
     INSTALLMENTS("وام و قسط"),
     DONG("بدهی و طلب (دُنگ)"),
-    REPORTS("گزارش‌گیری دخل و خرج")
+    REPORTS("گزارش دخل و خرج")
 }
 
 data class VoiceUiState(
     val isRecordingSimulated: Boolean = false,
     val recognizedText: String = "",
+    val manualAmountText: String = "",
     val storeName: String = "",
     val purposeCategory: String = "",
-    val cardLabel: String = "کارت بانکی",
+    val cardLabel: String = "نقدی / دستی",
     val totalAmountToman: Long = 0L,
     val dongAmountToman: Long = 0L,
     val dongFriendName: String = "",
@@ -183,7 +184,11 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun changeSelectedMonth(deltaMonths: Int) {
+        val currentRealYearMonthKey = JalaliCalendarUtils.fromTimestamp(System.currentTimeMillis()).yearMonthKey
         val current = _selectedYearMonthKey.value
+        if (deltaMonths > 0 && current >= currentRealYearMonthKey) {
+            return
+        }
         var year = current / 100
         var month = (current % 100) + deltaMonths
         while (month < 1) {
@@ -194,7 +199,12 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
             month -= 12
             year += 1
         }
-        _selectedYearMonthKey.value = year * 100 + month
+        val nextKey = year * 100 + month
+        _selectedYearMonthKey.value = if (deltaMonths > 0) {
+            nextKey.coerceAtMost(currentRealYearMonthKey)
+        } else {
+            nextKey
+        }
     }
 
     fun toggleHideAmounts() {
@@ -321,15 +331,17 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Opens the Voice Bottom Sheet with an EMPTY transcript (`""`)—never hardcoded "اسنپ‌مارکت"!
+     * Opens the Voice Bottom Sheet for a new manual cash/voice transaction (`+ ثبت صوتی`)
+     * with an EMPTY transcript (`""`) and `cardLabel = "نقدی / دستی"`.
      */
     fun openVoiceOverlayNew() {
         _voiceState.value = VoiceUiState(
             isRecordingSimulated = false,
             recognizedText = "",
-            storeName = "",
+            manualAmountText = "",
+            storeName = "نقدی / دستی",
             purposeCategory = "",
-            cardLabel = "کارت بانکی",
+            cardLabel = "نقدی / دستی",
             totalAmountToman = 0L,
             dongAmountToman = 0L,
             dongFriendName = "",
@@ -340,8 +352,8 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Opens the Voice Bottom Sheet for an untagged transaction with an EMPTY transcript (`""`)
-     * (or its existing custom purpose if already tagged), NEVER defaulting to "اسنپ‌مارکت" or "خرید روزمره"!
+     * Opens the Voice Bottom Sheet for an existing bank SMS transaction (`"بگو بابت چی؟"`).
+     * Locks the bank amount and bank name so they are NEVER altered by voice tagging!
      */
     fun openVoiceForUntaggedTransaction(tx: TransactionEntity) {
         _selectedTransactionForDetail.value = null
@@ -358,6 +370,7 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
         _voiceState.value = VoiceUiState(
             isRecordingSimulated = false,
             recognizedText = initialSpeech,
+            manualAmountText = PersianNumberUtils.formatToman(tx.totalAmountToman),
             storeName = tx.shortBankName,
             purposeCategory = initialSpeech,
             cardLabel = tx.cardInfo,
@@ -382,28 +395,67 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
         parseAndUpdateVoiceState(newSpeech, currentTarget)
     }
 
+    fun onVoiceManualAmountChanged(newAmountStr: String) {
+        val targetTx = _voiceState.value.targetUntaggedTransaction
+        if (targetTx != null) return // Existing bank SMS amount is locked
+        val formattedPersian = PersianNumberUtils.toPersianDigits(newAmountStr)
+        val numericVal = PersianNumberUtils.toEnglishDigits(formattedPersian)
+            .replace(",", "")
+            .replace("٬", "")
+            .trim()
+            .toLongOrNull() ?: 0L
+        val safeDong = _voiceState.value.dongAmountToman.coerceIn(0L, numericVal)
+        val userShare = (numericVal - safeDong).coerceAtLeast(0L)
+        _voiceState.value = _voiceState.value.copy(
+            manualAmountText = formattedPersian,
+            totalAmountToman = numericVal,
+            dongAmountToman = safeDong,
+            userShareToman = userShare
+        )
+    }
+
     private fun parseAndUpdateVoiceState(speech: String, targetTx: TransactionEntity?) {
         val parsed = PersianVoiceSlangParserEngine.parseVoiceCommand(
             rawSpeech = speech,
             fallbackTotalToman = targetTx?.totalAmountToman,
-            defaultBankName = targetTx?.shortBankName ?: ""
+            defaultBankName = targetTx?.shortBankName ?: "نقدی / دستی"
         )
+        val currentManualTyped = PersianNumberUtils.toEnglishDigits(_voiceState.value.manualAmountText)
+            .replace(",", "")
+            .replace("٬", "")
+            .trim()
+            .toLongOrNull() ?: 0L
+
+        val effectiveTotal = when {
+            targetTx != null -> targetTx.totalAmountToman
+            parsed.totalAmountToman > 0L -> parsed.totalAmountToman
+            else -> currentManualTyped
+        }
+        val effectiveManualText = when {
+            targetTx != null -> PersianNumberUtils.formatToman(targetTx.totalAmountToman)
+            parsed.totalAmountToman > 0L -> PersianNumberUtils.formatToman(parsed.totalAmountToman)
+            else -> _voiceState.value.manualAmountText
+        }
+        val safeDong = parsed.dongAmountToman.coerceIn(0L, effectiveTotal)
+        val effectiveUserShare = (effectiveTotal - safeDong).coerceAtLeast(0L)
+
         _voiceState.value = _voiceState.value.copy(
             recognizedText = speech,
-            storeName = parsed.storeName,
+            manualAmountText = effectiveManualText,
+            storeName = targetTx?.shortBankName ?: parsed.storeName.ifBlank { "نقدی / دستی" },
             purposeCategory = parsed.purposeCategory,
-            cardLabel = targetTx?.cardInfo ?: parsed.cardLabel,
-            totalAmountToman = targetTx?.totalAmountToman ?: parsed.totalAmountToman,
-            dongAmountToman = parsed.dongAmountToman,
+            cardLabel = targetTx?.cardInfo ?: "نقدی / دستی",
+            totalAmountToman = effectiveTotal,
+            dongAmountToman = safeDong,
             dongFriendName = parsed.dongFriendName,
-            userShareToman = parsed.userShareToman,
+            userShareToman = effectiveUserShare,
             targetUntaggedTransaction = targetTx
         )
     }
 
     /**
      * Fallback voice simulation when running on a web emulator without a microphone.
-     * Uses realistic everyday phrases like "پفک خریدم", "شارژ ایرانسل", "نانوایی سنگک", "کافه قهوه"
+     * Uses realistic everyday phrases like "پفک خریدم", "شارژ ایرانسل", "پنجاه تومن نانوایی سنگک"
      * and NEVER uses "اسنپ‌مارکت"!
      */
     fun triggerVoiceSimulation(samplePhrase: String? = null) {
@@ -417,7 +469,7 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
                 val phrase = when {
                     targetTx != null && targetTx.totalAmountToman == 49_500L -> "شارژ ایرانسل"
                     targetTx != null -> "پفک خریدم"
-                    else -> "صد هزار تومان پفک خریدم"
+                    else -> "پنجاه تومن نانوایی سنگک"
                 }
                 parseAndUpdateVoiceState(phrase, targetTx)
             }
@@ -428,20 +480,51 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
     fun confirmVoiceEntry() {
         viewModelScope.launch {
             val v = _voiceState.value
-            val parsed = PersianVoiceSlangParserEngine.parseVoiceCommand(
+            val targetTx = v.targetUntaggedTransaction
+            val typedManualAmount = PersianNumberUtils.toEnglishDigits(v.manualAmountText)
+                .replace(",", "")
+                .replace("٬", "")
+                .trim()
+                .toLongOrNull() ?: 0L
+
+            val parsedFromSpeech = PersianVoiceSlangParserEngine.parseVoiceCommand(
                 rawSpeech = v.recognizedText,
-                fallbackTotalToman = v.targetUntaggedTransaction?.totalAmountToman ?: v.totalAmountToman.takeIf { it > 0L },
-                defaultBankName = v.targetUntaggedTransaction?.shortBankName ?: ""
+                fallbackTotalToman = targetTx?.totalAmountToman,
+                defaultBankName = targetTx?.shortBankName ?: "نقدی / دستی"
             )
-            if (parsed.purposeCategory.isBlank()) {
+
+            val finalTotalAmount = when {
+                targetTx != null -> targetTx.totalAmountToman
+                typedManualAmount > 0L -> typedManualAmount
+                else -> parsedFromSpeech.totalAmountToman
+            }
+
+            if (parsedFromSpeech.purposeCategory.isBlank()) {
                 showBanner("لطفاً توضیح تراکنش را بگویید یا بنویسید.")
                 return@launch
             }
-            repository.confirmVoiceExpense(parsed, v.targetUntaggedTransaction?.id)
-            val msg = if (parsed.dongAmountToman > 0L && parsed.dongFriendName.isNotBlank()) {
-                "ثبت شد! «${parsed.purposeCategory}» — فقط سهم شما (${PersianNumberUtils.formatToman(parsed.userShareToman, true)}) کسر شد."
+
+            if (targetTx == null && finalTotalAmount <= 0L) {
+                showBanner("لطفاً مبلغ تراکنش را (بیشتر از ۰ تومان) بگویید یا در کادر مبلغ وارد کنید.")
+                return@launch
+            }
+
+            val safeDong = parsedFromSpeech.dongAmountToman.coerceIn(0L, finalTotalAmount)
+            val finalUserShare = (finalTotalAmount - safeDong).coerceAtLeast(0L)
+
+            val finalParsed = parsedFromSpeech.copy(
+                totalAmountToman = finalTotalAmount,
+                dongAmountToman = safeDong,
+                userShareToman = finalUserShare,
+                storeName = targetTx?.shortBankName ?: "نقدی / دستی",
+                cardLabel = targetTx?.cardInfo ?: "نقدی / دستی"
+            )
+
+            repository.confirmVoiceExpense(finalParsed, targetTx?.id)
+            val msg = if (finalParsed.dongAmountToman > 0L && finalParsed.dongFriendName.isNotBlank()) {
+                "ثبت شد! «${finalParsed.purposeCategory}» — فقط سهم شما (${PersianNumberUtils.formatToman(finalParsed.userShareToman, true)}) کسر شد."
             } else {
-                "تراکنش با عنوان «${parsed.purposeCategory}» ثبت شد ✓"
+                "تراکنش با عنوان «${finalParsed.purposeCategory}» (${PersianNumberUtils.formatToman(finalTotalAmount, true)}) ثبت شد ✓"
             }
             _showVoiceOverlaySheet.value = false
             _voiceState.value = VoiceUiState()

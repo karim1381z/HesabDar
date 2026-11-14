@@ -118,6 +118,7 @@ import kotlin.math.sin
 fun VoiceOverlayBottomSheet(
     voiceState: VoiceUiState,
     onSpeechChange: (String) -> Unit,
+    onManualAmountChange: (String) -> Unit = {},
     onSimulateVoiceRecord: () -> Unit,
     onConfirmVoiceEntry: () -> Unit,
     onDismiss: () -> Unit
@@ -365,8 +366,24 @@ fun VoiceOverlayBottomSheet(
             OutlinedTextField(
                 value = voiceState.recognizedText,
                 onValueChange = onSpeechChange,
-                label = { Text("متن تشخیص داده شده / بابتِ تراکنش (قابل ویرایش)") },
-                placeholder = { Text("مثلاً: پفک، شارژ ایرانسل، نانوایی...") },
+                label = {
+                    Text(
+                        if (targetTx != null) {
+                            "بابتِ این تراکنش بانکی (قابل ویرایش)"
+                        } else {
+                            "متن صوتی یا توضیح تراکنش نقدی/دستی"
+                        }
+                    )
+                },
+                placeholder = {
+                    Text(
+                        if (targetTx != null) {
+                            "مثلاً: پفک، شارژ ایرانسل، نانوایی..."
+                        } else {
+                            "مثلاً: پنجاه تومن نانوایی، ۳۰۰ تومن میوه..."
+                        }
+                    )
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("voice_live_text_input"),
@@ -377,6 +394,25 @@ fun VoiceOverlayBottomSheet(
                     unfocusedBorderColor = OrosiHairline
                 )
             )
+
+            // When creating a new manual cash/voice transaction (targetTx == null), show editable "مبلغ (تومان)" field
+            if (targetTx == null) {
+                Spacer(modifier = Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = voiceState.manualAmountText,
+                    onValueChange = onManualAmountChange,
+                    label = { Text("مبلغ (تومان) - الزامی برای ثبت دستی") },
+                    placeholder = { Text("مثلاً: ۵۰,۰۰۰ یا ۳۰۰,۰۰۰") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("voice_manual_amount_input"),
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = NishapurTurquoiseBright,
+                        unfocusedBorderColor = OrosiHairline
+                    )
+                )
+            }
 
             if (voiceState.purposeCategory.isNotBlank()) {
                 Spacer(modifier = Modifier.height(10.dp))
@@ -392,7 +428,7 @@ fun VoiceOverlayBottomSheet(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "عنوان ثبت‌شونده:",
+                        text = if (targetTx != null) "عنوان ثبت‌شونده:" else "عنوان (نقدی / دستی):",
                         style = MaterialTheme.typography.bodySmall,
                         color = OrosiOnSurfaceVariant
                     )
@@ -405,7 +441,11 @@ fun VoiceOverlayBottomSheet(
             } else {
                 // Keep testTag("recognized_speech_text") present even when empty
                 Text(
-                    text = "بگویید یا بنویسید این تراکنش بابت چه چیزی بود",
+                    text = if (targetTx != null) {
+                        "بگویید یا بنویسید این تراکنش بابت چه چیزی بود"
+                    } else {
+                        "مبلغ و بابت تراکنش نقدی را بگویید یا وارد کنید (مثلاً: ۵۰ تومن نانوایی)"
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = OrosiOnSurfaceVariant,
                     textAlign = TextAlign.Center,
@@ -415,20 +455,38 @@ fun VoiceOverlayBottomSheet(
                 )
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            val canConfirm = targetTx != null || voiceState.totalAmountToman > 0L
+            if (!canConfirm) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "برای ثبت تراکنش جدید، مبلغ باید بیشتر از ۰ تومان باشد.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = SaffronGoldLight,
+                    textAlign = TextAlign.Center
+                )
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
 
             // 3. Confirm Button: "تأیید و ثبت"
             Button(
                 onClick = onConfirmVoiceEntry,
+                enabled = canConfirm,
                 shape = RoundedCornerShape(18.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = NishapurTurquoise,
-                    contentColor = AlabasterSilk
+                    contentColor = AlabasterSilk,
+                    disabledContainerColor = OrosiSurfaceContainer,
+                    disabledContentColor = OrosiOnSurfaceVariant
                 ),
                 contentPadding = PaddingValues(vertical = 16.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, NishapurTurquoiseBright, RoundedCornerShape(18.dp))
+                    .border(
+                        1.dp,
+                        if (canConfirm) NishapurTurquoiseBright else OrosiHairline,
+                        RoundedCornerShape(18.dp)
+                    )
                     .testTag("confirm_voice_entry_button")
             ) {
                 Icon(imageVector = Icons.Default.Check, contentDescription = null)
@@ -913,9 +971,14 @@ fun TransactionDetailAndEditBottomSheet(
                     borderColor = if (isIncome) NishapurTurquoiseBright else RubyRoseSoft,
                     textColor = if (isIncome) NishapurTurquoiseSoft else RubyRoseSoft
                 )
-                // Badge 2: Bank
+                // Badge 2: Bank or Manual/Cash ("نقدی / دستی")
+                val bankBadgeLabel = if (transaction.shortBankName == "نقدی / دستی") {
+                    "نقدی / دستی"
+                } else {
+                    "بانک ${transaction.shortBankName}"
+                }
                 JibemanDetailBadge(
-                    text = "بانک ${transaction.shortBankName}",
+                    text = bankBadgeLabel,
                     bgColor = PersianLapis,
                     borderColor = PersianLapisLight.copy(alpha = 0.5f),
                     textColor = AlabasterSilk
@@ -1007,60 +1070,58 @@ fun TransactionDetailAndEditBottomSheet(
                 )
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Collapsible "مشاهده متن اصلی پیامک بانک"
-            val smsBodyText = transaction.rawSmsBody.ifBlank {
-                "بانک ${transaction.shortBankName}\nمبلغ: ${PersianNumberUtils.formatToman(transaction.totalAmountToman * 10L)} ریال\nتاریخ: ${jalaliInfo.dateWithYear} - ${transaction.timeStr}"
-            }
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(OrosiSurfaceContainer)
-                    .border(1.dp, OrosiHairline, RoundedCornerShape(14.dp))
-            ) {
-                Row(
+            // Collapsible "مشاهده متن اصلی پیامک بانک" ONLY if rawSmsBody is present (real bank SMS)
+            if (transaction.rawSmsBody.isNotBlank()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { showRawSms = !showRawSms }
-                        .padding(horizontal = 14.dp, vertical = 12.dp)
-                        .testTag("toggle_raw_sms_button"),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(OrosiSurfaceContainer)
+                        .border(1.dp, OrosiHairline, RoundedCornerShape(14.dp))
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Sms,
-                            contentDescription = null,
-                            tint = PersianLapisLight,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "مشاهده متن اصلی پیامک بانک",
-                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-                            color = PersianLapisLight
-                        )
-                    }
-                    Icon(
-                        imageVector = if (showRawSms) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                        contentDescription = null,
-                        tint = OrosiOnSurfaceVariant
-                    )
-                }
-
-                AnimatedVisibility(visible = showRawSms) {
-                    Text(
-                        text = smsBodyText,
-                        style = MaterialTheme.typography.bodySmall.copy(lineHeight = 20.sp),
-                        color = AlabasterSilk,
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 14.dp)
-                            .padding(bottom = 12.dp)
-                            .testTag("raw_sms_body_text")
-                    )
+                            .clickable { showRawSms = !showRawSms }
+                            .padding(horizontal = 14.dp, vertical = 12.dp)
+                            .testTag("toggle_raw_sms_button"),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Sms,
+                                contentDescription = null,
+                                tint = PersianLapisLight,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "مشاهده متن اصلی پیامک بانک",
+                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                                color = PersianLapisLight
+                            )
+                        }
+                        Icon(
+                            imageVector = if (showRawSms) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = null,
+                            tint = OrosiOnSurfaceVariant
+                        )
+                    }
+
+                    AnimatedVisibility(visible = showRawSms) {
+                        Text(
+                            text = transaction.rawSmsBody,
+                            style = MaterialTheme.typography.bodySmall.copy(lineHeight = 20.sp),
+                            color = AlabasterSilk,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp)
+                                .padding(bottom = 12.dp)
+                                .testTag("raw_sms_body_text")
+                        )
+                    }
                 }
             }
 
@@ -1660,6 +1721,7 @@ fun AddCommitmentBottomSheet(
     onDismiss: () -> Unit
 ) {
     var category by remember(defaultCategory) { mutableStateOf(defaultCategory) }
+    var isReceivableDong by remember { mutableStateOf(true) } // true = طلب دارم (به من بدهکار است), false = بدهی دارم (من بدهکارم)
     var title by remember { mutableStateOf("") }
     var counterparty by remember { mutableStateOf("") }
     var amountStr by remember { mutableStateOf("") }
@@ -1723,6 +1785,66 @@ fun AddCommitmentBottomSheet(
                 }
             }
 
+            // When "بدهی و طلب (دُنگ)" is selected, show a clear 2-way selector:
+            // "طلب دارم (به من بدهکار است)" vs "بدهی دارم (من بدهکارم)"
+            if (category == "DONG") {
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("dong_direction_selector"),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (isReceivableDong) NishapurTurquoiseDeep else OrosiSurfaceContainer)
+                            .border(
+                                1.dp,
+                                if (isReceivableDong) NishapurTurquoiseBright else OrosiHairline,
+                                RoundedCornerShape(12.dp)
+                            )
+                            .clickable { isReceivableDong = true }
+                            .padding(vertical = 10.dp, horizontal = 6.dp)
+                            .testTag("dong_type_receivable"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "طلب دارم (به من بدهکار است)",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            color = if (isReceivableDong) NishapurTurquoiseSoft else OrosiOnSurfaceVariant,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (!isReceivableDong) RubyRose.copy(alpha = 0.28f) else OrosiSurfaceContainer)
+                            .border(
+                                1.dp,
+                                if (!isReceivableDong) RubyRoseSoft else OrosiHairline,
+                                RoundedCornerShape(12.dp)
+                            )
+                            .clickable { isReceivableDong = false }
+                            .padding(vertical = 10.dp, horizontal = 6.dp)
+                            .testTag("dong_type_payable"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "بدهی دارم (من بدهکارم)",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            color = if (!isReceivableDong) RubyRoseSoft else OrosiOnSurfaceVariant,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(12.dp))
 
             OutlinedTextField(
@@ -1742,15 +1864,16 @@ fun AddCommitmentBottomSheet(
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedTextField(
                 value = dueDateStr,
-                onValueChange = { dueDateStr = it },
-                label = { Text("تاریخ سررسید (مثلاً: ۳۰ آبان ۱۴۰۴)") },
+                onValueChange = { dueDateStr = PersianNumberUtils.toPersianDigits(it) },
+                label = { Text("تاریخ سررسید (مثلاً: ۳۰ آبان ۱۴۰۵)") },
+                placeholder = { Text("مثلاً: ۳۰ آبان ۱۴۰۵") },
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedTextField(
                 value = counterparty,
                 onValueChange = { counterparty = it },
-                label = { Text("طرف حساب / بانک") },
+                label = { Text(if (category == "DONG") "نام دوست / طرف حساب" else "طرف حساب / بانک") },
                 modifier = Modifier.fillMaxWidth()
             )
 
@@ -1759,9 +1882,22 @@ fun AddCommitmentBottomSheet(
             Button(
                 onClick = {
                     val amount = PersianNumberUtils.toEnglishDigits(amountStr).toLongOrNull() ?: 5_000_000L
-                    val cleanTitle = title.trim().ifEmpty { "تعهد مالی جدید" }
-                    val cleanDate = dueDateStr.trim().ifEmpty { "سررسید این ماه" }
-                    onAddCommitment(category, cleanTitle, counterparty.trim(), amount, cleanDate, sayyadId)
+                    val baseTitle = title.trim().ifEmpty {
+                        when (category) {
+                            "DONG" -> if (isReceivableDong) "طلب دُنگ" else "بدهی دُنگ"
+                            "LOAN_INSTALLMENT" -> "قسط وام"
+                            else -> "چک صیادی"
+                        }
+                    }
+                    val cleanCounterparty = if (category == "DONG") {
+                        val prefix = if (isReceivableDong) "طلب از" else "بدهی به"
+                        val person = counterparty.trim().ifEmpty { "دوست" }
+                        if (person.startsWith("طلب") || person.startsWith("بدهی")) person else "$prefix $person"
+                    } else {
+                        counterparty.trim()
+                    }
+                    val cleanDate = dueDateStr.trim().ifEmpty { "۳۰ آبان ۱۴۰۵" }
+                    onAddCommitment(category, baseTitle, cleanCounterparty, amount, cleanDate, sayyadId)
                 },
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(

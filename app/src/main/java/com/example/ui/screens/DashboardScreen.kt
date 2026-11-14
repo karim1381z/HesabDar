@@ -234,9 +234,9 @@ fun DashboardScreen(
             }
         }
 
-        // 4. Recent Transaction Cards
+        // 4. Recent Transaction Cards (excluding any 0 Toman items)
         items(
-            items = transactions.take(25),
+            items = transactions.filter { it.totalAmountToman > 0L }.take(25),
             key = { tx -> tx.id }
         ) { tx ->
             CalmTransactionCard(
@@ -500,14 +500,15 @@ private fun BankAccountCarouselCard(
 ) {
     Column(
         modifier = Modifier
-            .width(172.dp)
+            .width(176.dp)
             .clip(RoundedCornerShape(20.dp))
             .background(OrosiSurfaceHigh)
             .border(
-                width = 1.dp,
-                color = if (account.isTankhah) NishapurTurquoiseBright.copy(alpha = 0.55f) else OrosiHairline,
+                width = if (account.isTankhah) 1.5.dp else 1.dp,
+                color = if (account.isTankhah) NishapurTurquoiseBright.copy(alpha = 0.65f) else OrosiHairline,
                 shape = RoundedCornerShape(20.dp)
             )
+            .clickable(onClick = onToggleTankhah)
             .padding(14.dp)
             .testTag("carousel_account_${account.bankName}"),
         verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -542,7 +543,7 @@ private fun BankAccountCarouselCard(
                 )
             }
 
-            // 1-tap badge to mark any account as "تنخواه"
+            // 1-tap badge to mark/unmark any account as "تنخواه"
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(50))
@@ -569,7 +570,7 @@ private fun BankAccountCarouselCard(
                         Spacer(modifier = Modifier.width(3.dp))
                     }
                     Text(
-                        text = "تنخواه",
+                        text = if (account.isTankhah) "تنخواه" else "+ تنخواه",
                         style = MaterialTheme.typography.labelSmall.copy(
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold

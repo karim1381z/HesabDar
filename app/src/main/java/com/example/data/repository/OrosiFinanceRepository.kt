@@ -70,11 +70,25 @@ class OrosiFinanceRepository(
         }
     }
 
-    private fun isDemoTransaction(tx: TransactionEntity): Boolean {
-        if (tx.storeName in demoStoreNames || tx.title in demoTitles) return true
-        if (tx.cardInfo == "کارت بانک" && (tx.storeName.contains("دیجی") || tx.storeName.contains("تپسی") || tx.storeName.contains("اسنپ"))) {
+    private fun isBogusOrTestTransaction(tx: TransactionEntity): Boolean {
+        if (tx.totalAmountToman <= 0L) return true
+        if (tx.bankName == "بانک" || tx.bankName == "تراکنش صوتی") return true
+        if (tx.storeName == "تراکنش صوتی" || tx.storeName == "بانک") return true
+        if (tx.cardInfo == "کارت بانک" || tx.cardInfo == "کارت تراکنش صوتی") return true
+        val combinedText = "${tx.title} ${tx.purpose} ${tx.storeName}"
+        if (combinedText.contains("به تومن برای خرید خانه بزرگ") ||
+            combinedText.contains("گوگولی") ||
+            combinedText.contains("سلام علیکم") ||
+            combinedText.contains("منفی خرج")
+        ) {
             return true
         }
+        return false
+    }
+
+    private fun isDemoTransaction(tx: TransactionEntity): Boolean {
+        if (isBogusOrTestTransaction(tx)) return true
+        if (tx.storeName in demoStoreNames || tx.title in demoTitles) return true
         if ((tx.weekdayDate == "جمعه ۱ آبان" || tx.weekdayDate == "پنجشنبه ۳۰ مهر" || tx.weekdayDate == "چهارشنبه ۲۹ مهر" || tx.weekdayDate == "سه‌شنبه ۲۸ مهر") &&
             tx.totalAmountToman in setOf(350_000L, 420_000L, 195_000L, 1_200_000L, 5_000_000L, 42_000_000L, 165_000L, 280_000L)
         ) {
@@ -209,7 +223,7 @@ class OrosiFinanceRepository(
                         bankName = "سپه",
                         nameEn = "Bank Sepah",
                         balanceToman = 984_433L,
-                        isTankhah = true,
+                        isTankhah = false,
                         cardLast4 = "۵۸۹۲",
                         lastUpdatedTimestamp = now - 2000L,
                         isManual = false
@@ -293,8 +307,16 @@ class OrosiFinanceRepository(
     }
 
     private suspend fun cleanupDemoAndDuplicatesIfRealSmsPresent() {
-        val hasRealSms = getPrimaryPrefs()?.getBoolean("has_real_bank_sms", false) == true
+        val prefs = getPrimaryPrefs()
+        val hasRealSms = prefs?.getBoolean("has_real_bank_sms", false) == true
         val allTxs = dao.getAllTransactionsNow()
+
+        // Always purge any 0-Toman or fake "بانک" test transactions so the ledger stays 100% clean
+        allTxs.filter { isBogusOrTestTransaction(it) }.forEach { bogusTx ->
+            dao.deleteTransactionById(bogusTx.id)
+        }
+        dao.deleteBankAccount("بانک")
+        dao.deleteBankAccount("تراکنش صوتی")
 
         if (hasRealSms) {
             allTxs.filter { isDemoTransaction(it) }.forEach { demoTx ->
@@ -303,6 +325,23 @@ class OrosiFinanceRepository(
             val allCommitments = dao.getAllCommitmentsNow()
             allCommitments.filter { isDemoCommitment(it) }.forEach { demoC ->
                 dao.deleteCommitmentById(demoC.id)
+            }
+        }
+
+        // One-time normalization so only the primary spending bank ("بلو" or the first bank) defaults to isTankhah = true
+        val normalizedV5 = prefs?.getBoolean("tankhah_default_normalized_v5", false) == true
+        if (!normalizedV5) {
+            val currentAccounts = dao.getAllBankAccountsNow()
+            if (currentAccounts.size > 1 && currentAccounts.count { it.isTankhah } > 1) {
+                val primaryBankName = currentAccounts.firstOrNull { it.bankName == "بلو" }?.bankName
+                    ?: currentAccounts.first().bankName
+                val normalizedList = currentAccounts.map { acc ->
+                    acc.copy(isTankhah = acc.bankName == primaryBankName)
+                }
+                dao.upsertBankAccounts(normalizedList)
+            }
+            if (currentAccounts.isNotEmpty()) {
+                prefs?.edit()?.putBoolean("tankhah_default_normalized_v5", true)?.apply()
             }
         }
     }
@@ -315,12 +354,14 @@ class OrosiFinanceRepository(
     ) {
         val existing = dao.getBankAccountByName(bankNameFa)
         if (existing == null) {
+            val allExisting = dao.getAllBankAccountsNow()
+            val defaultTankhah = bankNameFa == "بلو" || allExisting.isEmpty()
             dao.upsertBankAccount(
                 BankAccountEntity(
                     bankName = bankNameFa,
                     nameEn = bankNameEn,
                     balanceToman = balanceToman ?: 0L,
-                    isTankhah = true,
+                    isTankhah = defaultTankhah,
                     cardLast4 = "",
                     lastUpdatedTimestamp = smsTimestamp,
                     isManual = false
@@ -700,13 +741,18 @@ class OrosiFinanceRepository(
                 cleanupDemoAndDuplicatesIfRealSmsPresent()
 
                 val existingAccountsByName = dao.getAllBankAccountsNow().associateBy { it.bankName }
+                val primaryDefaultBank = if (discoveredBanks.containsKey("بلو")) {
+                    "بلو"
+                } else {
+                    discoveredBanks.keys.firstOrNull().orEmpty()
+                }
                 val updatedAccounts = discoveredBanks.values.map { st ->
                     val prev = existingAccountsByName[st.nameFa]
                     BankAccountEntity(
                         bankName = st.nameFa,
                         nameEn = st.nameEn,
                         balanceToman = st.latestBalanceToman ?: prev?.balanceToman ?: 0L,
-                        isTankhah = prev?.isTankhah ?: true,
+                        isTankhah = prev?.isTankhah ?: (st.nameFa == primaryDefaultBank),
                         cardLast4 = prev?.cardLast4 ?: "",
                         lastUpdatedTimestamp = maxOf(st.latestBalanceTimestamp, st.latestSeenTimestamp),
                         isManual = prev?.isManual ?: false
@@ -715,6 +761,7 @@ class OrosiFinanceRepository(
                 if (updatedAccounts.isNotEmpty()) {
                     dao.upsertBankAccounts(updatedAccounts)
                 }
+                cleanupDemoAndDuplicatesIfRealSmsPresent()
             }
 
             prefs.edit().putStringSet("jibeman_dedup_keys", importedKeys).apply()
@@ -751,8 +798,10 @@ class OrosiFinanceRepository(
 
     /**
      * Saves a voice-tagged expense or updates an untagged SMS transaction.
-     * NEVER defaults to "اسنپ‌مارکت" or "خرید روزمره"!
-     * Uses the user's exact spoken/typed purpose directly as `title` and `purpose`.
+     * - When tagging an existing bank SMS (`targetUntaggedTransactionId != null`), ONLY updates its
+     *   `title`/`purpose` (`بابت`) and `dong` split—NEVER changes its bank amount or bank name!
+     * - When creating a new manual voice transaction (`targetUntaggedTransactionId == null`),
+     *   requires `totalAmountToman > 0L` and labels it as `bankName = "نقدی / دستی"`.
      */
     suspend fun confirmVoiceExpense(
         parsedVoice: ParsedVoiceExpense,
@@ -771,17 +820,16 @@ class OrosiFinanceRepository(
                 val effectiveDong = parsedVoice.dongAmountToman.coerceAtMost(effectiveTotal)
                 val effectiveUserShare = (effectiveTotal - effectiveDong).coerceAtLeast(0L)
 
-                val resolvedStore = parsedVoice.storeName.trim().ifEmpty { existing.shortBankName }
                 val updatedTitle = if (effectiveDong > 0L) {
                     "$cleanPurpose (سهم شما)"
                 } else {
                     cleanPurpose
                 }
 
+                // Keep existing bankName, cardInfo, totalAmountToman, and storeName untouched!
                 dao.updateTransaction(
                     existing.copy(
                         title = updatedTitle,
-                        storeName = resolvedStore,
                         purpose = cleanPurpose,
                         userShareToman = effectiveUserShare,
                         dongAmountToman = effectiveDong,
@@ -795,11 +843,11 @@ class OrosiFinanceRepository(
                         CommitmentEntity(
                             category = "DONG",
                             title = "دنگ $cleanPurpose",
-                            counterparty = "سهم ${parsedVoice.dongFriendName} • ${existing.cardInfo}",
+                            counterparty = "طلب دارم • سهم ${parsedVoice.dongFriendName} • ${existing.cardInfo}",
                             amountToman = effectiveDong,
                             dueDateStr = "${existing.weekdayDate} • ${existing.timeStr}",
                             sayyadId = "",
-                            statusText = "در انتظار تسویه ${parsedVoice.dongFriendName}",
+                            statusText = "طلب دارم (به من بدهکار است) • ${parsedVoice.dongFriendName}",
                             isSettled = false,
                             timestamp = now
                         )
@@ -811,8 +859,17 @@ class OrosiFinanceRepository(
             }
         }
 
-        val resolvedStore = parsedVoice.storeName.trim().ifEmpty { "تراکنش صوتی" }
-        val title = if (parsedVoice.dongAmountToman > 0L) {
+        // Manual cash/voice transaction: block saving if amount <= 0L!
+        if (parsedVoice.totalAmountToman <= 0L) return
+
+        val effectiveDong = parsedVoice.dongAmountToman.coerceIn(0L, parsedVoice.totalAmountToman)
+        val effectiveUserShare = (parsedVoice.totalAmountToman - effectiveDong).coerceAtLeast(0L)
+        val manualBankLabel = "نقدی / دستی"
+        val resolvedStore = parsedVoice.storeName.trim()
+            .takeIf { it.isNotBlank() && it != "بانک" && it != "تراکنش صوتی" }
+            ?: manualBankLabel
+
+        val title = if (effectiveDong > 0L) {
             "$cleanPurpose (سهم خالص شما)"
         } else {
             cleanPurpose
@@ -824,29 +881,30 @@ class OrosiFinanceRepository(
                 storeName = resolvedStore,
                 purpose = cleanPurpose,
                 totalAmountToman = parsedVoice.totalAmountToman,
-                userShareToman = parsedVoice.userShareToman,
-                dongAmountToman = parsedVoice.dongAmountToman,
+                userShareToman = effectiveUserShare,
+                dongAmountToman = effectiveDong,
                 dongFriendName = parsedVoice.dongFriendName,
                 weekdayDate = nowJalali.weekdayDate,
                 timeStr = nowJalali.timeStr,
-                cardInfo = parsedVoice.cardLabel,
+                cardInfo = manualBankLabel,
                 type = "EXPENSE",
                 isUntagged = false,
                 timestamp = now,
-                bankName = resolvedStore
+                rawSmsBody = "",
+                bankName = manualBankLabel
             )
         )
 
-        if (parsedVoice.dongAmountToman > 0L && parsedVoice.dongFriendName.isNotBlank()) {
+        if (effectiveDong > 0L && parsedVoice.dongFriendName.isNotBlank()) {
             dao.insertCommitment(
                 CommitmentEntity(
                     category = "DONG",
                     title = "دنگ $cleanPurpose",
-                    counterparty = "سهم ${parsedVoice.dongFriendName} • پرداخت با ${parsedVoice.cardLabel}",
-                    amountToman = parsedVoice.dongAmountToman,
+                    counterparty = "طلب دارم • سهم ${parsedVoice.dongFriendName} • $manualBankLabel",
+                    amountToman = effectiveDong,
                     dueDateStr = "${nowJalali.weekdayDate} • ${nowJalali.timeStr}",
                     sayyadId = "",
-                    statusText = "در انتظار تسویه ${parsedVoice.dongFriendName}",
+                    statusText = "طلب دارم (به من بدهکار است) • ${parsedVoice.dongFriendName}",
                     isSettled = false,
                     timestamp = now
                 )

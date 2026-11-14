@@ -37,13 +37,19 @@ data class TransactionEntity(
         get() = "$weekdayDate • $timeStr • $cardInfo"
 
     val shortBankName: String
-        get() = bankName.ifBlank {
-            cardInfo
-                .replace("کارت", "")
-                .replace("حساب", "")
-                .replace(Regex("[۰-۹0-9]+"), "")
-                .trim()
-                .ifEmpty { "بانک" }
+        get() {
+            val candidate = bankName.ifBlank {
+                cardInfo
+                    .replace("کارت", "")
+                    .replace("حساب", "")
+                    .replace(Regex("[۰-۹0-9]+"), "")
+                    .trim()
+            }
+            return if (candidate.isBlank() || candidate == "بانک" || candidate == "تراکنش صوتی") {
+                "نقدی / دستی"
+            } else {
+                candidate
+            }
         }
 
     val simpleSubtitle: String
@@ -57,6 +63,9 @@ data class TransactionEntity(
                 purpose != "واریز به حساب" -> {
                 if (storeName.isNotBlank() &&
                     storeName != "نامشخص" &&
+                    storeName != "نقدی / دستی" &&
+                    storeName != "تراکنش صوتی" &&
+                    storeName != "بانک" &&
                     storeName != shortBankName &&
                     storeName != bankName &&
                     !purpose.contains(storeName)

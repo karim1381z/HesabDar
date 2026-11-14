@@ -33,7 +33,10 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.CommitmentEntity
 import com.example.data.local.TransactionEntity
+import com.example.domain.JalaliCalendarUtils
 import com.example.domain.PersianNumberUtils
 import com.example.ui.CommitmentTab
 import com.example.ui.theme.AlabasterSilk
@@ -106,8 +110,8 @@ fun CommitmentsScreen(
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. Clean 2x2 Jibeman Tools Grid Selector:
-        // ۱) چک صیادی  ۲) وام و قسط  ۳) بدهی و طلب (دُنگ)  ۴) گزارش‌گیری دخل و خرج
+        // 1. Clean 2x2 Jibeman Tools Grid Selector without truncation:
+        // چک صیادی | وام و قسط | بدهی و طلب (دُنگ) | گزارش دخل و خرج
         item {
             Column(
                 modifier = Modifier
@@ -120,7 +124,7 @@ fun CommitmentsScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     ToolGridCard(
-                        title = "۱) چک صیادی",
+                        title = "چک صیادی",
                         icon = Icons.Default.VerifiedUser,
                         isSelected = selectedTab == CommitmentTab.SAYYAD,
                         accentColor = RoyalAmethystSoft,
@@ -129,7 +133,7 @@ fun CommitmentsScreen(
                         modifier = Modifier.weight(1f)
                     )
                     ToolGridCard(
-                        title = "۲) وام و قسط",
+                        title = "وام و قسط",
                         icon = Icons.Default.AccountBalance,
                         isSelected = selectedTab == CommitmentTab.INSTALLMENTS,
                         accentColor = SaffronGoldBright,
@@ -143,7 +147,7 @@ fun CommitmentsScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     ToolGridCard(
-                        title = "۳) بدهی و طلب (دُنگ)",
+                        title = "بدهی و طلب (دُنگ)",
                         icon = Icons.Default.Group,
                         isSelected = selectedTab == CommitmentTab.DONG,
                         accentColor = NishapurTurquoiseBright,
@@ -152,7 +156,7 @@ fun CommitmentsScreen(
                         modifier = Modifier.weight(1f)
                     )
                     ToolGridCard(
-                        title = "۴) گزارش‌گیری دخل و خرج",
+                        title = "گزارش دخل و خرج",
                         icon = Icons.Default.Assessment,
                         isSelected = selectedTab == CommitmentTab.REPORTS,
                         accentColor = PersianLapisLight,
@@ -338,21 +342,45 @@ private fun IncomeExpenseReportSection(
     commitments: List<CommitmentEntity>,
     hideAmounts: Boolean
 ) {
-    val totalIncome = transactions.filter { it.type == "INCOME" }.sumOf { it.userShareToman }
-    val totalExpense = transactions.filter { it.type == "EXPENSE" }.sumOf { it.userShareToman }
+    // Default to "این ماه (آبان ۱۴۰۵)" with a clean toggle for "کل زمان‌ها"
+    var isCurrentMonthOnly by remember { mutableStateOf(true) }
+    val currentJalali = remember { JalaliCalendarUtils.fromTimestamp(System.currentTimeMillis()) }
+
+    val filteredTransactions = remember(transactions, isCurrentMonthOnly, currentJalali) {
+        val valid = transactions.filter { it.totalAmountToman > 0L && it.shortBankName != "بانک" }
+        if (isCurrentMonthOnly) {
+            valid.filter { tx ->
+                val j = JalaliCalendarUtils.fromTimestamp(tx.timestamp)
+                j.year == currentJalali.year && j.month == currentJalali.month
+            }
+        } else {
+            valid
+        }
+    }
+
+    val totalIncome = filteredTransactions.filter { it.type == "INCOME" }.sumOf { it.userShareToman }
+    val totalExpense = filteredTransactions.filter { it.type == "EXPENSE" }.sumOf { it.userShareToman }
     val activeCommitments = commitments.filter { !it.isSettled }.sumOf { it.amountToman }
 
-    val expensesByBank = transactions
-        .filter { it.type == "EXPENSE" }
+    // Exclude "نقدی / دستی" and "بانک" test items from the bank breakdown chart
+    val expensesByBank = filteredTransactions
+        .filter {
+            it.type == "EXPENSE" &&
+                it.shortBankName != "نقدی / دستی" &&
+                it.shortBankName != "بانک" &&
+                it.shortBankName != "تراکنش صوتی"
+        }
         .groupBy { it.shortBankName }
         .mapValues { (_, list) -> list.sumOf { it.userShareToman } }
+        .filterValues { it > 0L }
         .entries
         .sortedByDescending { it.value }
 
-    val expensesByPurpose = transactions
+    val expensesByPurpose = filteredTransactions
         .filter { it.type == "EXPENSE" }
         .groupBy { it.displayTitle }
         .mapValues { (_, list) -> list.sumOf { it.userShareToman } }
+        .filterValues { it > 0L }
         .entries
         .sortedByDescending { it.value }
         .take(8)
@@ -363,6 +391,60 @@ private fun IncomeExpenseReportSection(
             .testTag("reports_section"),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        // Time Range Toggle: "این ماه (آبان ۱۴۰۵)" vs "کل زمان‌ها"
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(OrosiSurfaceContainer)
+                .border(1.dp, OrosiHairline, RoundedCornerShape(16.dp))
+                .padding(4.dp)
+                .testTag("reports_time_range_toggle"),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (isCurrentMonthOnly) NishapurTurquoise else Color.Transparent)
+                    .clickable { isCurrentMonthOnly = true }
+                    .padding(vertical = 10.dp)
+                    .testTag("report_toggle_this_month"),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "این ماه (${currentJalali.monthYearLabel})",
+                    style = MaterialTheme.typography.labelLarge.copy(
+                        fontWeight = if (isCurrentMonthOnly) FontWeight.Bold else FontWeight.Medium
+                    ),
+                    color = if (isCurrentMonthOnly) AlabasterSilk else OrosiOnSurfaceVariant,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (!isCurrentMonthOnly) NishapurTurquoise else Color.Transparent)
+                    .clickable { isCurrentMonthOnly = false }
+                    .padding(vertical = 10.dp)
+                    .testTag("report_toggle_all_time"),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "کل زمان‌ها",
+                    style = MaterialTheme.typography.labelLarge.copy(
+                        fontWeight = if (!isCurrentMonthOnly) FontWeight.Bold else FontWeight.Medium
+                    ),
+                    color = if (!isCurrentMonthOnly) AlabasterSilk else OrosiOnSurfaceVariant,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+        }
+
         // Summary Card
         Column(
             modifier = Modifier
@@ -374,7 +456,11 @@ private fun IncomeExpenseReportSection(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                text = "خلاصه گزارش دخل و خرج",
+                text = if (isCurrentMonthOnly) {
+                    "خلاصه گزارش دخل و خرج (${currentJalali.monthYearLabel})"
+                } else {
+                    "خلاصه گزارش دخل و خرج (کل زمان‌ها)"
+                },
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
                 color = AlabasterSilk
             )
