@@ -74,6 +74,7 @@ fun DashboardScreen(
     settings: AppSettingsEntity,
     transactions: List<TransactionEntity>,
     onHeroCardClick: () -> Unit,
+    onAddVoiceClick: () -> Unit,
     onTransactionClick: (TransactionEntity) -> Unit,
     onUntaggedMicClick: (TransactionEntity) -> Unit,
     modifier: Modifier = Modifier
@@ -82,7 +83,7 @@ fun DashboardScreen(
         modifier = modifier
             .fillMaxSize()
             .testTag("dashboard_screen"),
-        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 96.dp),
+        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // 1. Radically Decluttered Royal Blue Hero Card
@@ -93,17 +94,57 @@ fun DashboardScreen(
             )
         }
 
-        // 2. Calm Section Header (no filter chips, no count badges)
+        // 2. Section Header "تراکنش‌های اخیر" + Sleek Turquoise Pill Button "+ ثبت صوتی"
         item {
-            Text(
-                text = "تراکنش‌های اخیر",
-                style = MaterialTheme.typography.titleLarge,
-                color = AlabasterSilk,
-                modifier = Modifier.padding(top = 8.dp, bottom = 2.dp)
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp, bottom = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "تراکنش‌های اخیر",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = AlabasterSilk
+                )
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(
+                            Brush.horizontalGradient(
+                                colors = listOf(
+                                    NishapurTurquoise,
+                                    NishapurTurquoiseDeep
+                                )
+                            )
+                        )
+                        .border(1.dp, NishapurTurquoiseBright, RoundedCornerShape(50))
+                        .clickable(onClick = onAddVoiceClick)
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                        .testTag("header_voice_add_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Mic,
+                        contentDescription = "+ ثبت صوتی",
+                        tint = AlabasterSilk,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "+ ثبت صوتی",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                        color = AlabasterSilk,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+            }
         }
 
-        // 3. Spacious, Breathable Transaction Cards (16.dp vertical spacing)
+        // 3. Spacious, Breathable Transaction Cards (16.dp vertical spacing, no FAB overlap!)
         items(
             items = transactions,
             key = { tx -> tx.id }

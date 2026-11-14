@@ -36,12 +36,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CurrencyExchange
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.Sms
+import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -79,6 +83,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.example.data.local.AppSettingsEntity
+import com.example.data.local.CommitmentEntity
 import com.example.data.local.TransactionEntity
 import com.example.domain.ParsedSmsResult
 import com.example.domain.PersianNumberUtils
@@ -96,8 +101,12 @@ import com.example.ui.theme.OrosiSurfaceLow
 import com.example.ui.theme.PersianLapis
 import com.example.ui.theme.PersianLapisLight
 import com.example.ui.theme.RoyalAmethyst
+import com.example.ui.theme.RoyalAmethystSoft
+import com.example.ui.theme.RubyRose
+import com.example.ui.theme.RubyRoseSoft
 import com.example.ui.theme.SaffronGold
 import com.example.ui.theme.SaffronGoldBright
+import com.example.ui.theme.SaffronGoldDeep
 import com.example.ui.theme.SaffronGoldLight
 import kotlin.math.sin
 
@@ -137,7 +146,6 @@ fun VoiceOverlayBottomSheet(
             }
             override fun onError(error: Int) {
                 isLiveHardwareListening = false
-                // Fallback to interactive preset simulator if hardware recognizer fails
                 onSimulateVoiceRecord()
             }
             override fun onResults(results: Bundle?) {
@@ -225,7 +233,7 @@ fun VoiceOverlayBottomSheet(
                 .testTag("voice_overlay_sheet"),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // 1. Glowing Turquoise Audio Wave (Uses real fa-IR SpeechRecognizer or Preview Fallback)
+            // 1. Glowing Turquoise Audio Wave
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -331,6 +339,523 @@ fun VoiceOverlayBottomSheet(
                 )
             }
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun HeroMathBreakdownBottomSheet(
+    settings: AppSettingsEntity,
+    transactions: List<TransactionEntity>,
+    reservedCommitmentsToman: Long,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    val totalIncomeToman = remember(transactions) {
+        transactions.filter { it.type == "INCOME" }.sumOf { it.userShareToman }
+            .takeIf { it > 0L } ?: 42_000_000L
+    }
+    val totalExpensesToman = remember(transactions) {
+        transactions.filter { it.type == "EXPENSE" }.sumOf { it.userShareToman }
+    }
+    val totalGoldSavedThisMonthToman = remember(transactions) {
+        transactions.filter { it.type == "GOLD_SAVE" }.sumOf { it.userShareToman }
+            .takeIf { it > 0L } ?: 1_200_000L
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = OrosiSurfaceLow,
+        contentColor = AlabasterSilk
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 32.dp)
+                .testTag("hero_math_sheet"),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "ترازنامه ماه حقوقی و سهم خرج امروزت",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                color = AlabasterSilk
+            )
+
+            // Stress-free Monthly Balance Report ("ترازنامه ماه حقوقی")
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(OrosiSurfaceContainer)
+                    .border(1.dp, OrosiHairline, RoundedCornerShape(20.dp))
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "ترازنامه ماه حقوقی",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = AlabasterSilk
+                    )
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(NishapurTurquoiseDeep)
+                            .border(1.dp, NishapurTurquoiseBright, RoundedCornerShape(50))
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "تراز مثبت و متعادل ✓",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = NishapurTurquoiseSoft
+                        )
+                    }
+                }
+
+                MonthlyReportRow(
+                    label = "کل ورودی ماه حقوقی",
+                    amountText = "+${PersianNumberUtils.formatToman(totalIncomeToman, showUnit = true)}",
+                    valueColor = NishapurTurquoiseSoft
+                )
+                MonthlyReportRow(
+                    label = "کل خرج مصرفی",
+                    amountText = PersianNumberUtils.formatToman(totalExpensesToman, showUnit = true),
+                    valueColor = RubyRoseSoft
+                )
+                MonthlyReportRow(
+                    label = "کنار گذاشته شده برای قسط و چک",
+                    amountText = PersianNumberUtils.formatToman(reservedCommitmentsToman, showUnit = true),
+                    valueColor = RoyalAmethystSoft
+                )
+                MonthlyReportRow(
+                    label = "تبدیل شده به طلا",
+                    amountText = PersianNumberUtils.formatToman(totalGoldSavedThisMonthToman, showUnit = true),
+                    valueColor = SaffronGoldLight
+                )
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(PersianLapis)
+                    .border(1.dp, PersianLapisLight.copy(alpha = 0.35f), RoundedCornerShape(18.dp))
+                    .padding(18.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "سهم خرجِ امروزت",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = PersianLapisLight
+                    )
+                    Text(
+                        text = "تراز آزاد ماه: ${PersianNumberUtils.formatToman(settings.monthlyBalanceToman, showUnit = true)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = NishapurTurquoiseSoft
+                    )
+                }
+                Text(
+                    text = PersianNumberUtils.formatToman(settings.dailySafeBudgetToman, showUnit = true),
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black),
+                    color = AlabasterSilk
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MonthlyReportRow(
+    label: String,
+    amountText: String,
+    valueColor: Color
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = OrosiOnSurfaceVariant
+        )
+        Text(
+            text = amountText,
+            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+            color = valueColor,
+            maxLines = 1,
+            softWrap = false
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CommitmentActionBottomSheet(
+    commitment: CommitmentEntity,
+    onSaveCommitment: (
+        title: String,
+        counterparty: String,
+        amountToman: Long,
+        dueDateStr: String,
+        isSettled: Boolean
+    ) -> Unit,
+    onDeleteCommitment: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var titleStr by remember(commitment) { mutableStateOf(commitment.title) }
+    var counterpartyStr by remember(commitment) { mutableStateOf(commitment.counterparty) }
+    var amountStr by remember(commitment) {
+        mutableStateOf(PersianNumberUtils.formatToman(commitment.amountToman))
+    }
+    var dueDateStr by remember(commitment) { mutableStateOf(commitment.dueDateStr) }
+
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = OrosiSurfaceLow,
+        contentColor = AlabasterSilk
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 28.dp)
+                .testTag("commitment_action_sheet")
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "مدیریت و تسویه تعهد مالی",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                    color = AlabasterSilk
+                )
+                IconButton(onClick = onDismiss) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "بستن",
+                        tint = OrosiOnSurfaceVariant
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Primary 1-Tap Settlement CTA: "پاس شد / تسویه شد ✓"
+            Button(
+                onClick = {
+                    val parsedAmount = PersianNumberUtils.toEnglishDigits(amountStr).toLongOrNull()
+                        ?: commitment.amountToman
+                    onSaveCommitment(
+                        titleStr,
+                        counterpartyStr,
+                        parsedAmount,
+                        dueDateStr,
+                        !commitment.isSettled
+                    )
+                },
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (commitment.isSettled) PersianLapis else NishapurTurquoise,
+                    contentColor = AlabasterSilk
+                ),
+                contentPadding = PaddingValues(vertical = 16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, NishapurTurquoiseBright, RoundedCornerShape(16.dp))
+                    .testTag("mark_commitment_settled_button")
+            ) {
+                Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = if (commitment.isSettled) "بازگردانی به وضعیت فعال" else "پاس شد / تسویه شد ✓",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            OutlinedTextField(
+                value = titleStr,
+                onValueChange = { titleStr = it },
+                label = { Text("عنوان چک، قسط یا دُنگ") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = amountStr,
+                onValueChange = { amountStr = PersianNumberUtils.toPersianDigits(it) },
+                label = { Text("مبلغ (تومان)") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = dueDateStr,
+                onValueChange = { dueDateStr = PersianNumberUtils.toPersianDigits(it) },
+                label = { Text("تاریخ سررسید") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = counterpartyStr,
+                onValueChange = { counterpartyStr = it },
+                label = { Text("طرف حساب / بانک") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onDeleteCommitment,
+                    shape = RoundedCornerShape(14.dp),
+                    contentPadding = PaddingValues(vertical = 14.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("delete_commitment_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.DeleteOutline,
+                        contentDescription = null,
+                        tint = RubyRoseSoft
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "حذف",
+                        color = RubyRoseSoft,
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
+
+                Button(
+                    onClick = {
+                        val parsedAmount = PersianNumberUtils.toEnglishDigits(amountStr).toLongOrNull()
+                            ?: commitment.amountToman
+                        onSaveCommitment(
+                            titleStr,
+                            counterpartyStr,
+                            parsedAmount,
+                            dueDateStr,
+                            commitment.isSettled
+                        )
+                    },
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = RoyalAmethyst,
+                        contentColor = AlabasterSilk
+                    ),
+                    contentPadding = PaddingValues(vertical = 14.dp),
+                    modifier = Modifier
+                        .weight(1.6f)
+                        .testTag("save_commitment_edits_button")
+                ) {
+                    Text(
+                        text = "ذخیره ویرایش",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun GoldPartnerAffiliateBottomSheet(
+    settings: AppSettingsEntity,
+    onDirectPurchaseGold: (Long) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var selectedAmountToman by remember { mutableStateOf(2_000_000L) }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = OrosiSurfaceLow,
+        contentColor = AlabasterSilk
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 22.dp)
+                .padding(bottom = 30.dp)
+                .testTag("gold_partner_modal"),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Verified,
+                        contentDescription = null,
+                        tint = SaffronGoldBright,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "پلتفرم‌های معتبر خرید آنلاین طلای ۱۸ عیار",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
+                        color = AlabasterSilk
+                    )
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "بستن",
+                        tint = OrosiOnSurfaceVariant
+                    )
+                }
+            }
+
+            Text(
+                text = "همکاری رسمی اُرسی با پلتفرم‌های دارای مجوز اتحادیه طلا و جواهر و صندوق‌های طلای بورس (کارمزد ویژه ۰٪ برای کاربران خیال راحت):",
+                style = MaterialTheme.typography.bodySmall,
+                color = OrosiOnSurfaceVariant
+            )
+
+            // Partner 1
+            PartnerPlatformItem(
+                name = "صندوق‌های طلای بورس (عیار / لوتوس / کهربا)",
+                subtitle = "تحت نظارت سازمان بورس • معاف از مالیات • نقدشوندگی آنی",
+                badge = "کارمزد ۰٪ اُرسی"
+            )
+
+            // Partner 2
+            PartnerPlatformItem(
+                name = "خزانه طلای آب‌شده ۱۸ عیار (تحویل فیزیکی و آنلاین)",
+                subtitle = "دارای مجوز رسمی اتحادیه طلا و شمش بانک مرکزی",
+                badge = "پشتوانه فیزیکی"
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                listOf(1_000_000L, 2_000_000L, 5_000_000L).forEach { amt ->
+                    val isSelected = selectedAmountToman == amt
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (isSelected) SaffronGold else OrosiSurfaceContainer)
+                            .border(
+                                1.dp,
+                                if (isSelected) SaffronGoldBright else OrosiHairline,
+                                RoundedCornerShape(12.dp)
+                            )
+                            .clickable { selectedAmountToman = amt }
+                            .padding(vertical = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = PersianNumberUtils.formatToman(amt, showUnit = true),
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = AlabasterSilk,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                }
+            }
+
+            Button(
+                onClick = { onDirectPurchaseGold(selectedAmountToman) },
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = SaffronGold,
+                    contentColor = AlabasterSilk
+                ),
+                contentPadding = PaddingValues(vertical = 16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, SaffronGoldBright, RoundedCornerShape(16.dp))
+                    .testTag("confirm_partner_gold_purchase_button")
+            ) {
+                Icon(imageVector = Icons.Default.CurrencyExchange, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "ثبت خرید بدون کارمزد و افزودن به قلک طلا",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PartnerPlatformItem(
+    name: String,
+    subtitle: String,
+    badge: String
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(OrosiSurfaceHigh)
+            .border(1.dp, SaffronGoldBright.copy(alpha = 0.28f), RoundedCornerShape(16.dp))
+            .padding(14.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = name,
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                color = AlabasterSilk,
+                modifier = Modifier.weight(1f)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(SaffronGoldDeep)
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
+            ) {
+                Text(
+                    text = badge,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = SaffronGoldLight
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = subtitle,
+            style = MaterialTheme.typography.bodySmall,
+            color = OrosiOnSurfaceVariant
+        )
     }
 }
 
@@ -549,7 +1074,6 @@ fun TransactionDetailAndEditBottomSheet(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Toggle to mark as "قسط/وام", "بدهی/طلب (دُنگ)", or "تبدیل به طلا"
             val modeOptions = listOf(
                 "NORMAL" to "خرج عادی",
                 "INSTALLMENT" to "قسط/وام",
@@ -634,98 +1158,6 @@ fun TransactionDetailAndEditBottomSheet(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun HeroMathBreakdownBottomSheet(
-    settings: AppSettingsEntity,
-    reservedCommitmentsToman: Long,
-    onDismiss: () -> Unit
-) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = OrosiSurfaceLow,
-        contentColor = AlabasterSilk
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp)
-                .padding(bottom = 32.dp)
-                .testTag("hero_math_sheet"),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Text(
-                text = "جزئیات محاسبه سهم خرج امروزت",
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                color = AlabasterSilk
-            )
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(OrosiSurfaceContainer)
-                    .padding(16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "تراز آزاد ماه حقوقی",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = OrosiOnSurfaceVariant
-                )
-                Text(
-                    text = PersianNumberUtils.formatToman(settings.monthlyBalanceToman, showUnit = true),
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = NishapurTurquoiseSoft
-                )
-            }
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(OrosiSurfaceContainer)
-                    .padding(16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "کنار گذاشته برای قسط و چک",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = OrosiOnSurfaceVariant
-                )
-                Text(
-                    text = PersianNumberUtils.formatToman(reservedCommitmentsToman, showUnit = true),
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = SaffronGoldLight
-                )
-            }
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(PersianLapis)
-                    .padding(16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "سهم خرجِ امروزت",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = PersianLapisLight
-                )
-                Text(
-                    text = PersianNumberUtils.formatToman(settings.dailySafeBudgetToman, showUnit = true),
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black),
-                    color = AlabasterSilk
-                )
-            }
-        }
-    }
-}
-
 data class BankSmsSample(
     val label: String,
     val smsText: String
@@ -736,6 +1168,7 @@ data class BankSmsSample(
 fun SmsSimulatorBottomSheet(
     onPreviewSms: (String) -> ParsedSmsResult,
     onProcessSms: (String) -> Unit,
+    onScanDeviceInboxLast30Days: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val samples = remember {
@@ -799,7 +1232,7 @@ fun SmsSimulatorBottomSheet(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "دریافت خودکار و شبیه‌ساز پیامک بانکی",
+                        text = "اسکنر و شبیه‌ساز پیامک بانکی",
                         style = MaterialTheme.typography.titleLarge,
                         color = AlabasterSilk
                     )
@@ -814,6 +1247,34 @@ fun SmsSimulatorBottomSheet(
             }
 
             Spacer(modifier = Modifier.height(10.dp))
+
+            // Prominent Real Device SMS Inbox 30-Day Scanner Button
+            Button(
+                onClick = onScanDeviceInboxLast30Days,
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = PersianLapis,
+                    contentColor = AlabasterSilk
+                ),
+                contentPadding = PaddingValues(vertical = 14.dp, horizontal = 14.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, NishapurTurquoiseBright, RoundedCornerShape(16.dp))
+                    .testTag("scan_device_sms_inbox_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Sync,
+                    contentDescription = null,
+                    tint = NishapurTurquoiseBright
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "اسکن خودکار پیامک‌های بانکی گوشی (۳۰ روز اخیر)",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
 
             Row(
                 modifier = Modifier

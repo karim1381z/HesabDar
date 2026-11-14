@@ -60,7 +60,7 @@ import com.example.ui.theme.SaffronGoldBright
 @Composable
 fun CommitmentsScreen(
     commitments: List<CommitmentEntity>,
-    onToggleSettled: (CommitmentEntity) -> Unit,
+    onCommitmentClick: (CommitmentEntity) -> Unit,
     onOpenAddCommitmentModal: () -> Unit,
     onBackToDashboard: () -> Unit,
     modifier: Modifier = Modifier
@@ -109,7 +109,7 @@ fun CommitmentsScreen(
             item {
                 SpaciousPurpleSayyadCard(
                     cheque = issuedCheque,
-                    onToggleSettled = { onToggleSettled(issuedCheque) }
+                    onClick = { onCommitmentClick(issuedCheque) }
                 )
             }
         }
@@ -129,7 +129,7 @@ fun CommitmentsScreen(
                 commitment = item,
                 accentColor = accentColor,
                 icon = icon,
-                onToggleSettled = { onToggleSettled(item) }
+                onClick = { onCommitmentClick(item) }
             )
         }
 
@@ -162,7 +162,7 @@ fun CommitmentsScreen(
 @Composable
 private fun SpaciousPurpleSayyadCard(
     cheque: CommitmentEntity,
-    onToggleSettled: () -> Unit
+    onClick: () -> Unit
 ) {
     Box(
         modifier = Modifier
@@ -184,7 +184,7 @@ private fun SpaciousPurpleSayyadCard(
                 RoyalAmethystSoft.copy(alpha = 0.45f),
                 RoundedCornerShape(24.dp)
             )
-            .clickable(onClick = onToggleSettled)
+            .clickable(onClick = onClick)
             .padding(22.dp)
             .testTag("purple_sayyad_cheque_card")
     ) {
@@ -236,7 +236,7 @@ private fun SpaciousPurpleSayyadCard(
             Spacer(modifier = Modifier.height(10.dp))
 
             Text(
-                text = if (cheque.isSettled) "✓ پاس شده" else cheque.counterparty,
+                text = if (cheque.isSettled) "پاس شد / تسویه شد ✓" else cheque.counterparty,
                 style = MaterialTheme.typography.bodySmall,
                 color = if (cheque.isSettled) NishapurTurquoiseSoft else RoyalAmethystSoft,
                 maxLines = 1,
@@ -251,7 +251,7 @@ private fun SpaciousCommitmentCard(
     commitment: CommitmentEntity,
     accentColor: Color,
     icon: ImageVector,
-    onToggleSettled: () -> Unit
+    onClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -259,7 +259,7 @@ private fun SpaciousCommitmentCard(
             .clip(RoundedCornerShape(20.dp))
             .background(OrosiSurfaceHigh)
             .border(1.dp, accentColor.copy(alpha = 0.30f), RoundedCornerShape(20.dp))
-            .clickable(onClick = onToggleSettled)
+            .clickable(onClick = onClick)
             .padding(horizontal = 18.dp, vertical = 18.dp)
             .testTag("commitment_card_${commitment.id}"),
         verticalAlignment = Alignment.CenterVertically,
@@ -294,7 +294,7 @@ private fun SpaciousCommitmentCard(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = if (commitment.isSettled) "✓ تسویه شد" else commitment.dueDateStr,
+                    text = if (commitment.isSettled) "پاس شد / تسویه شد ✓" else commitment.dueDateStr,
                     style = MaterialTheme.typography.bodySmall,
                     color = if (commitment.isSettled) NishapurTurquoiseBright else OrosiOnSurfaceVariant,
                     maxLines = 1,

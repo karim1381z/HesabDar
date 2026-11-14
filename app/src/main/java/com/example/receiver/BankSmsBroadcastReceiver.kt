@@ -36,7 +36,7 @@ class BankSmsBroadcastReceiver : BroadcastReceiver() {
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
                 val dao = OrosiDatabase.getInstance(appContext).orosiDao()
-                val repository = OrosiFinanceRepository(dao)
+                val repository = OrosiFinanceRepository(dao, appContext)
                 repository.processIncomingBankSms(fullBody)
             } finally {
                 pendingResult.finish()

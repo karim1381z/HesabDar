@@ -31,11 +31,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.EventNote
-import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -58,7 +56,9 @@ import com.example.ui.OrosiScreen
 import com.example.ui.OrosiUiState
 import com.example.ui.OrosiViewModel
 import com.example.ui.components.AddCommitmentBottomSheet
+import com.example.ui.components.CommitmentActionBottomSheet
 import com.example.ui.components.ConvertSurplusToGoldBottomSheet
+import com.example.ui.components.GoldPartnerAffiliateBottomSheet
 import com.example.ui.components.HeroMathBreakdownBottomSheet
 import com.example.ui.components.PaydayAndBackupBottomSheet
 import com.example.ui.components.SmsSimulatorBottomSheet
@@ -102,10 +102,23 @@ fun OrosiFinanceApp(
     uiState: OrosiUiState,
     viewModel: OrosiViewModel
 ) {
+    // Request RECEIVE_SMS, READ_SMS, and RECORD_AUDIO permissions via RequestMultiplePermissions
     val smsPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { _ ->
         viewModel.setShowSmsSimulator(true)
+    }
+
+    val smsScanPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ ->
+        viewModel.scanDeviceSmsInboxLast30Days()
+    }
+
+    val voicePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ ->
+        viewModel.openVoiceOverlayNew()
     }
 
     val reservedCommitmentsToman = uiState.commitments
@@ -131,26 +144,6 @@ fun OrosiFinanceApp(
                     )
                 }
             )
-        },
-        floatingActionButton = {
-            if (uiState.currentScreen == OrosiScreen.DASHBOARD) {
-                FloatingActionButton(
-                    onClick = { viewModel.openVoiceOverlayNew() },
-                    shape = CircleShape,
-                    containerColor = NishapurTurquoise,
-                    contentColor = AlabasterSilk,
-                    modifier = Modifier
-                        .size(60.dp)
-                        .border(1.5.dp, NishapurTurquoiseBright, CircleShape)
-                        .testTag("floating_voice_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Mic,
-                        contentDescription = "ثبت صوتی",
-                        modifier = Modifier.size(28.dp)
-                    )
-                }
-            }
         },
         bottomBar = {
             OrosiBottomNavigationBar(
@@ -199,15 +192,22 @@ fun OrosiFinanceApp(
                             settings = uiState.settings,
                             transactions = uiState.transactions,
                             onHeroCardClick = { viewModel.setShowHeroMathSheet(true) },
+                            onAddVoiceClick = {
+                                voicePermissionLauncher.launch(
+                                    arrayOf(Manifest.permission.RECORD_AUDIO)
+                                )
+                            },
                             onTransactionClick = { tx -> viewModel.openTransactionDetails(tx) },
-                            onUntaggedMicClick = { tx -> viewModel.openVoiceForUntaggedTransaction(tx) }
+                            onUntaggedMicClick = { tx ->
+                                viewModel.openVoiceForUntaggedTransaction(tx)
+                            }
                         )
                     }
 
                     OrosiScreen.COMMITMENTS -> {
                         CommitmentsScreen(
                             commitments = uiState.commitments,
-                            onToggleSettled = { viewModel.toggleCommitmentSettled(it) },
+                            onCommitmentClick = { viewModel.openCommitmentActionSheet(it) },
                             onOpenAddCommitmentModal = { viewModel.setShowAddCommitmentModal(true) },
                             onBackToDashboard = { viewModel.navigateTo(OrosiScreen.DASHBOARD) }
                         )
@@ -217,6 +217,7 @@ fun OrosiFinanceApp(
                         InflationShieldScreen(
                             settings = uiState.settings,
                             onOpenConvertGoldModal = { viewModel.setShowConvertGoldModal(true) },
+                            onOpenGoldPartnerModal = { viewModel.setShowGoldPartnerModal(true) },
                             onBackToDashboard = { viewModel.navigateTo(OrosiScreen.DASHBOARD) }
                         )
                     }
@@ -225,7 +226,7 @@ fun OrosiFinanceApp(
         }
     }
 
-    // Full Transaction Details & Edit Bottom Sheet (6 Core Fields + Classification Toggle + Voice Re-tag)
+    // Full Transaction Details & Edit Bottom Sheet
     val detailTx = uiState.selectedTransactionForDetail
     if (detailTx != null) {
         TransactionDetailAndEditBottomSheet(
@@ -247,6 +248,26 @@ fun OrosiFinanceApp(
         )
     }
 
+    // Interactive Commitment Settlement / Edit / Delete Sheet
+    val actionCommitment = uiState.selectedCommitmentForAction
+    if (actionCommitment != null) {
+        CommitmentActionBottomSheet(
+            commitment = actionCommitment,
+            onSaveCommitment = { title, counterparty, amount, dueDate, isSettled ->
+                viewModel.updateCommitmentFromSheet(
+                    original = actionCommitment,
+                    title = title,
+                    counterparty = counterparty,
+                    amountToman = amount,
+                    dueDateStr = dueDate,
+                    isSettled = isSettled
+                )
+            },
+            onDeleteCommitment = { viewModel.deleteCommitmentFromSheet(actionCommitment) },
+            onDismiss = { viewModel.dismissCommitmentActionSheet() }
+        )
+    }
+
     // Effortless Voice Overlay Bottom Sheet
     if (uiState.showVoiceOverlaySheet) {
         VoiceOverlayBottomSheet(
@@ -258,10 +279,11 @@ fun OrosiFinanceApp(
         )
     }
 
-    // Optional Hero Card Math Modal
+    // Hero Card Math & Monthly Balance Report Modal ("ترازنامه ماه حقوقی")
     if (uiState.showHeroMathSheet) {
         HeroMathBreakdownBottomSheet(
             settings = uiState.settings,
+            transactions = uiState.transactions,
             reservedCommitmentsToman = reservedCommitmentsToman,
             onDismiss = { viewModel.setShowHeroMathSheet(false) }
         )
@@ -271,6 +293,14 @@ fun OrosiFinanceApp(
         SmsSimulatorBottomSheet(
             onPreviewSms = { viewModel.previewBankSms(it) },
             onProcessSms = { viewModel.processBankSms(it) },
+            onScanDeviceInboxLast30Days = {
+                smsScanPermissionLauncher.launch(
+                    arrayOf(
+                        Manifest.permission.READ_SMS,
+                        Manifest.permission.RECEIVE_SMS
+                    )
+                )
+            },
             onDismiss = { viewModel.setShowSmsSimulator(false) }
         )
     }
@@ -302,6 +332,14 @@ fun OrosiFinanceApp(
             settings = uiState.settings,
             onConvert = { viewModel.convertSurplusToGold(it) },
             onDismiss = { viewModel.setShowConvertGoldModal(false) }
+        )
+    }
+
+    if (uiState.showGoldPartnerModal) {
+        GoldPartnerAffiliateBottomSheet(
+            settings = uiState.settings,
+            onDirectPurchaseGold = { viewModel.convertSurplusToGold(it) },
+            onDismiss = { viewModel.setShowGoldPartnerModal(false) }
         )
     }
 }

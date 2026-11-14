@@ -110,6 +110,9 @@ interface OrosiDao {
     @Update
     suspend fun updateCommitment(commitment: CommitmentEntity)
 
+    @Query("DELETE FROM commitments WHERE id = :id")
+    suspend fun deleteCommitmentById(id: Long)
+
     @Query("DELETE FROM commitments")
     suspend fun clearAllCommitments()
 

@@ -54,30 +54,35 @@ data class OrosiUiState(
     val commitments: List<CommitmentEntity> = emptyList(),
     val voiceState: VoiceUiState = VoiceUiState(),
     val selectedTransactionForDetail: TransactionEntity? = null,
+    val selectedCommitmentForAction: CommitmentEntity? = null,
     val showVoiceOverlaySheet: Boolean = false,
     val showHeroMathSheet: Boolean = false,
     val showSmsSimulatorModal: Boolean = false,
     val showPaydayBackupModal: Boolean = false,
     val showAddCommitmentModal: Boolean = false,
     val showConvertGoldModal: Boolean = false,
+    val showGoldPartnerModal: Boolean = false,
     val backupJsonText: String = "",
     val statusBannerMessage: String? = null
 )
 
 class OrosiViewModel(application: Application) : AndroidViewModel(application) {
-    private val dao = OrosiDatabase.getInstance(application).orosiDao()
-    private val repository = OrosiFinanceRepository(dao)
+    private val appContext = application.applicationContext
+    private val dao = OrosiDatabase.getInstance(appContext).orosiDao()
+    private val repository = OrosiFinanceRepository(dao, appContext)
 
     private val _currentScreen = MutableStateFlow(OrosiScreen.DASHBOARD)
     private val _selectedCommitmentTab = MutableStateFlow(CommitmentTab.SAYYAD)
     private val _voiceState = MutableStateFlow(VoiceUiState())
     private val _selectedTransactionForDetail = MutableStateFlow<TransactionEntity?>(null)
+    private val _selectedCommitmentForAction = MutableStateFlow<CommitmentEntity?>(null)
     private val _showVoiceOverlaySheet = MutableStateFlow(false)
     private val _showHeroMathSheet = MutableStateFlow(false)
     private val _showSmsSimulatorModal = MutableStateFlow(false)
     private val _showPaydayBackupModal = MutableStateFlow(false)
     private val _showAddCommitmentModal = MutableStateFlow(false)
     private val _showConvertGoldModal = MutableStateFlow(false)
+    private val _showGoldPartnerModal = MutableStateFlow(false)
     private val _backupJsonText = MutableStateFlow("")
     private val _statusBannerMessage = MutableStateFlow<String?>(null)
 
@@ -123,20 +128,29 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
     }.combine(
         combine(
             _selectedTransactionForDetail,
+            _selectedCommitmentForAction,
             _showAddCommitmentModal,
             _showConvertGoldModal,
-            _backupJsonText,
-            _statusBannerMessage
-        ) { selectedTx, addComm, goldModal, backup, banner ->
-            Tuple5(selectedTx, addComm, goldModal, backup, banner)
+            _showGoldPartnerModal
+        ) { selectedTx, selectedComm, addComm, goldModal, partnerModal ->
+            Tuple5(selectedTx, selectedComm, addComm, goldModal, partnerModal)
         }
     ) { state, extra ->
         state.copy(
             selectedTransactionForDetail = extra.first,
-            showAddCommitmentModal = extra.second,
-            showConvertGoldModal = extra.third,
-            backupJsonText = extra.fourth,
-            statusBannerMessage = extra.fifth
+            selectedCommitmentForAction = extra.second,
+            showAddCommitmentModal = extra.third,
+            showConvertGoldModal = extra.fourth,
+            showGoldPartnerModal = extra.fifth
+        )
+    }.combine(
+        combine(_backupJsonText, _statusBannerMessage) { backup, banner ->
+            Pair(backup, banner)
+        }
+    ) { state, pair ->
+        state.copy(
+            backupJsonText = pair.first,
+            statusBannerMessage = pair.second
         )
     }.stateIn(
         scope = viewModelScope,
@@ -186,7 +200,46 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
                 specialTagMode = specialTagMode
             )
             _selectedTransactionForDetail.value = null
-            showBanner("جزئیات تراکنش «$storeName» با موفقیت بروزرسانی شد.")
+            showBanner("جزئیات تراکنش «$storeName» با موفقیت ذخیره شد.")
+        }
+    }
+
+    fun openCommitmentActionSheet(commitment: CommitmentEntity) {
+        _selectedCommitmentForAction.value = commitment
+    }
+
+    fun dismissCommitmentActionSheet() {
+        _selectedCommitmentForAction.value = null
+    }
+
+    fun updateCommitmentFromSheet(
+        original: CommitmentEntity,
+        title: String,
+        counterparty: String,
+        amountToman: Long,
+        dueDateStr: String,
+        isSettled: Boolean
+    ) {
+        viewModelScope.launch {
+            repository.updateCommitmentDetails(
+                original = original,
+                title = title,
+                counterparty = counterparty,
+                amountToman = amountToman,
+                dueDateStr = dueDateStr,
+                isSettled = isSettled
+            )
+            _selectedCommitmentForAction.value = null
+            val statusMsg = if (isSettled) "پاس شد / تسویه شد ✓ و تراز ماه بروزرسانی شد." else "تغییرات تعهد ذخیره شد."
+            showBanner("«$title» — $statusMsg")
+        }
+    }
+
+    fun deleteCommitmentFromSheet(commitment: CommitmentEntity) {
+        viewModelScope.launch {
+            repository.deleteCommitment(commitment.id)
+            _selectedCommitmentForAction.value = null
+            showBanner("«${commitment.title}» از فهرست تعهدات حذف شد.")
         }
     }
 
@@ -302,6 +355,19 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun scanDeviceSmsInboxLast30Days() {
+        viewModelScope.launch {
+            val count = repository.scanDeviceSmsInboxLast30Days(appContext)
+            _showSmsSimulatorModal.value = false
+            val countStr = PersianNumberUtils.toPersianDigits(count.toString())
+            if (count > 0) {
+                showBanner("$countStr پیامک بانکی جدید از ۳۰ روز اخیر اسکن و به تراکنش‌ها اضافه شد.")
+            } else {
+                showBanner("تمامی پیامک‌های بانکی ۳۰ روز اخیر قبلاً ثبت شده‌اند (تکراری وجود ندارد).")
+            }
+        }
+    }
+
     fun setShowPaydayBackupModal(show: Boolean) {
         if (show) {
             viewModelScope.launch {
@@ -376,7 +442,7 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.toggleCommitmentSettled(commitment)
             val msg = if (!commitment.isSettled) {
-                "«${commitment.title}» تسویه شد."
+                "«${commitment.title}» پاس شد / تسویه شد ✓"
             } else {
                 "وضعیت «${commitment.title}» به حالت فعال بازگشت."
             }
@@ -388,10 +454,15 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
         _showConvertGoldModal.value = show
     }
 
+    fun setShowGoldPartnerModal(show: Boolean) {
+        _showGoldPartnerModal.value = show
+    }
+
     fun convertSurplusToGold(amountToman: Long) {
         viewModelScope.launch {
             repository.convertSurplusToGold(amountToman)
             _showConvertGoldModal.value = false
+            _showGoldPartnerModal.value = false
             showBanner("مبلغ ${PersianNumberUtils.formatToman(amountToman, true)} به قلک طلای ۱۸ عیار افزوده شد.")
         }
     }

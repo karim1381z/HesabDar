@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CurrencyExchange
+import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -43,19 +45,23 @@ import androidx.compose.ui.unit.sp
 import com.example.data.local.AppSettingsEntity
 import com.example.domain.PersianNumberUtils
 import com.example.ui.theme.AlabasterSilk
+import com.example.ui.theme.NishapurTurquoiseBright
 import com.example.ui.theme.NishapurTurquoiseSoft
 import com.example.ui.theme.OrosiOnSurfaceVariant
 import com.example.ui.theme.OrosiSurfaceContainer
+import com.example.ui.theme.OrosiSurfaceHigh
 import com.example.ui.theme.SaffronGold
 import com.example.ui.theme.SaffronGoldBright
 import com.example.ui.theme.SaffronGoldContainer
 import com.example.ui.theme.SaffronGoldDeep
 import com.example.ui.theme.SaffronGoldFixed
+import com.example.ui.theme.SaffronGoldLight
 
 @Composable
 fun InflationShieldScreen(
     settings: AppSettingsEntity,
     onOpenConvertGoldModal: () -> Unit,
+    onOpenGoldPartnerModal: () -> Unit,
     onBackToDashboard: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -66,7 +72,7 @@ fun InflationShieldScreen(
             .fillMaxSize()
             .testTag("inflation_shield_screen"),
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp)
+        verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
         // 1. Warm Amber-Gold Hero Card: ۴۸,۵۰۰,۰۰۰ تومان
         item {
@@ -103,6 +109,50 @@ fun InflationShieldScreen(
                     text = "تبدیل مازاد تراز به طلا",
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 )
+            }
+        }
+
+        // 4. Subtle, High-Trust Partner Card Below the Main CTA
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(OrosiSurfaceHigh)
+                    .border(1.dp, SaffronGoldBright.copy(alpha = 0.35f), RoundedCornerShape(20.dp))
+                    .clickable(onClick = onOpenGoldPartnerModal)
+                    .padding(horizontal = 18.dp, vertical = 16.dp)
+                    .testTag("gold_partner_card"),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(SaffronGold.copy(alpha = 0.18f))
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Verified,
+                        contentDescription = null,
+                        tint = SaffronGoldBright,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "خرید و فروش آنلاین طلای ۱۸ عیار (پلتفرم‌های معتبر دارای مجوز)",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                        color = AlabasterSilk
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "کارمزد صفر • تحویل فیزیکی و صندوق‌های طلای بورس • اتصال مستقیم",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = SaffronGoldLight
+                    )
+                }
             }
             Spacer(modifier = Modifier.height(20.dp))
         }
