@@ -60,6 +60,8 @@ import com.example.ui.theme.SaffronGoldLight
 fun AccountsScreen(
     bankAccounts: List<BankAccountEntity>,
     hideAmounts: Boolean,
+    tankhahModeEnabled: Boolean = false,
+    onSetTankhahModeEnabled: (Boolean) -> Unit = {},
     onToggleTankhah: (String) -> Unit,
     onOpenAddAccountModal: () -> Unit,
     onBackToHome: () -> Unit,
@@ -67,6 +69,8 @@ fun AccountsScreen(
 ) {
     BackHandler(onBack = onBackToHome)
 
+    val totalAllAccountsToman = bankAccounts
+        .sumOf { it.balanceToman.coerceAtLeast(0L) }
     val tankhahAccountsToman = bankAccounts
         .filter { it.isTankhah }
         .sumOf { it.balanceToman.coerceAtLeast(0L) }
@@ -81,7 +85,7 @@ fun AccountsScreen(
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. Top Card showing separate "موجودی تنخواه (خرج روزمره)" and "موجودی غیرتنخواه (پس‌انداز)"
+        // 1. Top Summary Card
         item {
             Column(
                 modifier = Modifier
@@ -103,63 +107,139 @@ fun AccountsScreen(
                     .testTag("accounts_summary_card"),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(NishapurTurquoiseDeep.copy(alpha = 0.55f))
-                        .border(1.dp, NishapurTurquoiseBright.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "موجودی تنخواه (خرج روزمره):",
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                        color = NishapurTurquoiseSoft
-                    )
-                    Text(
-                        text = PersianNumberUtils.formatToman(
-                            tankhahAccountsToman,
-                            showUnit = true,
-                            hideAmount = hideAmounts
-                        ),
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
-                        color = AlabasterSilk,
-                        modifier = Modifier.testTag("tankhah_accounts_balance_text")
-                    )
-                }
+                if (tankhahModeEnabled) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(NishapurTurquoiseDeep.copy(alpha = 0.55f))
+                            .border(1.dp, NishapurTurquoiseBright.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "موجودی تنخواه (خرج روزمره):",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                            color = NishapurTurquoiseSoft
+                        )
+                        Text(
+                            text = PersianNumberUtils.formatToman(
+                                tankhahAccountsToman,
+                                showUnit = true,
+                                hideAmount = hideAmounts
+                            ),
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
+                            color = AlabasterSilk,
+                            modifier = Modifier.testTag("tankhah_accounts_balance_text")
+                        )
+                    }
 
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(PersianLapis.copy(alpha = 0.65f))
-                        .border(1.dp, PersianLapisLight.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "موجودی غیرتنخواه (پس‌انداز):",
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                        color = PersianLapisLight
-                    )
-                    Text(
-                        text = PersianNumberUtils.formatToman(
-                            nonTankhahAccountsToman,
-                            showUnit = true,
-                            hideAmount = hideAmounts
-                        ),
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
-                        color = SaffronGoldLight,
-                        modifier = Modifier.testTag("total_accounts_balance_text")
-                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(PersianLapis.copy(alpha = 0.65f))
+                            .border(1.dp, PersianLapisLight.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "سایر حساب‌ها (پس‌انداز):",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                            color = PersianLapisLight
+                        )
+                        Text(
+                            text = PersianNumberUtils.formatToman(
+                                nonTankhahAccountsToman,
+                                showUnit = true,
+                                hideAmount = hideAmounts
+                            ),
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
+                            color = SaffronGoldLight,
+                            modifier = Modifier.testTag("total_accounts_balance_text")
+                        )
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(NishapurTurquoiseDeep.copy(alpha = 0.55f))
+                            .border(1.dp, NishapurTurquoiseBright.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "موجودی کل حساب‌ها:",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                            color = NishapurTurquoiseSoft
+                        )
+                        Text(
+                            text = PersianNumberUtils.formatToman(
+                                totalAllAccountsToman,
+                                showUnit = true,
+                                hideAmount = hideAmounts
+                            ),
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
+                            color = AlabasterSilk,
+                            modifier = Modifier.testTag("total_accounts_balance_text")
+                        )
+                    }
                 }
             }
         }
 
-        // 2. Section header + Button to "افزودن منبع مالی"
+        // 2. Clean Switch: "فعالسازی حالت حساب تنخواه (تفکیک خرج روزمره از پس‌انداز)"
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(OrosiSurfaceHigh)
+                    .border(
+                        1.dp,
+                        if (tankhahModeEnabled) NishapurTurquoiseBright.copy(alpha = 0.55f) else OrosiHairline,
+                        RoundedCornerShape(18.dp)
+                    )
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .testTag("enable_tankhah_mode_card"),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "فعالسازی حالت حساب تنخواه (تفکیک خرج روزمره از پس‌انداز)",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                        color = AlabasterSilk
+                    )
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Text(
+                        text = if (tankhahModeEnabled) {
+                            "فعال: کارت‌های خرج روزمره از سایر حساب‌ها (پس‌انداز) تفکیک شده‌اند"
+                        } else {
+                            "غیرفعال (پیش‌فرض): مجموع کل حساب‌ها یکجا محاسبه می‌شود"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = OrosiOnSurfaceVariant
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Switch(
+                    checked = tankhahModeEnabled,
+                    onCheckedChange = onSetTankhahModeEnabled,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = AlabasterSilk,
+                        checkedTrackColor = NishapurTurquoise
+                    ),
+                    modifier = Modifier.testTag("enable_tankhah_mode_switch")
+                )
+            }
+        }
+
+        // 3. Section header
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -179,7 +259,7 @@ fun AccountsScreen(
             }
         }
 
-        // 3. List of all bank accounts detected from SMS + toggle on each account for "حساب تنخواه (خرج روزمره)"
+        // 4. List of all bank accounts detected from SMS
         items(
             items = bankAccounts,
             key = { it.bankName }
@@ -187,11 +267,12 @@ fun AccountsScreen(
             BankAccountRowCard(
                 account = account,
                 hideAmounts = hideAmounts,
+                tankhahModeEnabled = tankhahModeEnabled,
                 onToggleTankhah = { onToggleTankhah(account.bankName) }
             )
         }
 
-        // 4. Button: "افزودن منبع مالی"
+        // 5. Button: "افزودن منبع مالی"
         item {
             Spacer(modifier = Modifier.height(4.dp))
             Button(
@@ -223,6 +304,7 @@ fun AccountsScreen(
 private fun BankAccountRowCard(
     account: BankAccountEntity,
     hideAmounts: Boolean,
+    tankhahModeEnabled: Boolean,
     onToggleTankhah: () -> Unit
 ) {
     val lastUpdatedJalali = JalaliCalendarUtils.fromTimestamp(account.lastUpdatedTimestamp)
@@ -234,7 +316,7 @@ private fun BankAccountRowCard(
             .background(OrosiSurfaceHigh)
             .border(
                 1.dp,
-                if (account.isTankhah) NishapurTurquoiseBright.copy(alpha = 0.45f) else OrosiHairline,
+                if (tankhahModeEnabled && account.isTankhah) NishapurTurquoiseBright.copy(alpha = 0.45f) else OrosiHairline,
                 RoundedCornerShape(20.dp)
             )
             .padding(18.dp)
@@ -304,30 +386,32 @@ private fun BankAccountRowCard(
             }
         }
 
-        // Toggle row: "حساب تنخواه (خرج روزمره)"
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(OrosiSurfaceContainer)
-                .padding(horizontal = 14.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "حساب تنخواه (خرج روزمره)",
-                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                color = AlabasterSilk
-            )
-            Switch(
-                checked = account.isTankhah,
-                onCheckedChange = { onToggleTankhah() },
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = AlabasterSilk,
-                    checkedTrackColor = NishapurTurquoise
-                ),
-                modifier = Modifier.testTag("account_tankhah_switch_${account.bankName}")
-            )
+        // Toggle row: "حساب تنخواه (خرج روزمره)" ONLY shown when tankhahModeEnabled == true
+        if (tankhahModeEnabled) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(OrosiSurfaceContainer)
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "حساب تنخواه (خرج روزمره)",
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                    color = AlabasterSilk
+                )
+                Switch(
+                    checked = account.isTankhah,
+                    onCheckedChange = { onToggleTankhah() },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = AlabasterSilk,
+                        checkedTrackColor = NishapurTurquoise
+                    ),
+                    modifier = Modifier.testTag("account_tankhah_switch_${account.bankName}")
+                )
+            }
         }
     }
 }

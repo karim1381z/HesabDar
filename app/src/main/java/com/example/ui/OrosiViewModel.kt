@@ -69,6 +69,7 @@ data class OrosiUiState(
     val showPaydayBackupModal: Boolean = false,
     val showAddCommitmentModal: Boolean = false,
     val showAddBankAccountModal: Boolean = false,
+    val isSyncingSms: Boolean = false,
     val backupJsonText: String = "",
     val statusBannerMessage: String? = null
 )
@@ -93,6 +94,7 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
     private val _showPaydayBackupModal = MutableStateFlow(false)
     private val _showAddCommitmentModal = MutableStateFlow(false)
     private val _showAddBankAccountModal = MutableStateFlow(false)
+    private val _isSyncingSms = MutableStateFlow(false)
     private val _backupJsonText = MutableStateFlow("")
     private val _statusBannerMessage = MutableStateFlow<String?>(null)
 
@@ -181,13 +183,14 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
             showAddBankAccountModal = extra.fourth
         )
     }.combine(
-        combine(_backupJsonText, _statusBannerMessage) { backup, banner ->
-            Pair(backup, banner)
+        combine(_backupJsonText, _statusBannerMessage, _isSyncingSms) { backup, banner, syncing ->
+            Triple(backup, banner, syncing)
         }
-    ) { state, pair ->
+    ) { state, triple ->
         state.copy(
-            backupJsonText = pair.first,
-            statusBannerMessage = pair.second
+            backupJsonText = triple.first,
+            statusBannerMessage = triple.second,
+            isSyncingSms = triple.third
         )
     }.stateIn(
         scope = viewModelScope,
@@ -237,6 +240,18 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
     fun setOnlyTankhahMode(onlyTankhah: Boolean) {
         viewModelScope.launch {
             repository.setOnlyTankhahMode(onlyTankhah)
+        }
+    }
+
+    fun setTankhahModeEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            repository.setTankhahModeEnabled(enabled)
+            val msg = if (enabled) {
+                "حالت تفکیک حساب تنخواه از پس‌انداز فعال شد ✓"
+            } else {
+                "حالت تنخواه غیرفعال شد؛ مجموع کل حساب‌ها نمایش داده می‌شود."
+            }
+            showBanner(msg)
         }
     }
 
@@ -419,13 +434,8 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
     fun onVoiceManualAmountChanged(newAmountStr: String) {
         val targetTx = _voiceState.value.targetUntaggedTransaction
         if (targetTx != null) return // Existing bank SMS amount is locked
-        val formattedPersian = PersianNumberUtils.toPersianDigits(newAmountStr)
-        val directDigits = PersianNumberUtils.toEnglishDigits(formattedPersian)
-            .replace(",", "")
-            .replace("٬", "")
-            .trim()
-            .toLongOrNull()
-        val numericVal = directDigits
+        val formattedPersian = PersianNumberUtils.formatLiveAmountInput(newAmountStr)
+        val numericVal = PersianNumberUtils.parseAmountInputToLong(formattedPersian)
             ?: PersianVoiceSlangParserEngine.parseSpokenPersianAmountToman(newAmountStr)
         val safeDong = _voiceState.value.dongAmountToman.coerceIn(0L, numericVal)
         val userShare = (numericVal - safeDong).coerceAtLeast(0L)
@@ -437,22 +447,51 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    fun onVoicePurposeChanged(newPurpose: String) {
+        _voiceState.value = _voiceState.value.copy(
+            purposeCategory = newPurpose
+        )
+    }
+
+    fun onUpdateMultiVoiceItem(index: Int, newTitle: String, newAmountStr: String) {
+        val currentList = _voiceState.value.parsedMultiItems.toMutableList()
+        if (index !in currentList.indices) return
+        val existingItem = currentList[index]
+        val parsedAmount = PersianNumberUtils.parseAmountInputToLong(newAmountStr) ?: 0L
+        currentList[index] = existingItem.copy(
+            purposeCategory = newTitle,
+            totalAmountToman = parsedAmount,
+            userShareToman = parsedAmount
+        )
+        val targetTx = _voiceState.value.targetUntaggedTransaction
+        val combinedNote = PersianVoiceSlangParserEngine.formatCombinedMultiVoiceNote(currentList)
+        val newTotal = if (targetTx != null) {
+            targetTx.totalAmountToman
+        } else {
+            currentList.sumOf { it.totalAmountToman }
+        }
+        _voiceState.value = _voiceState.value.copy(
+            parsedMultiItems = currentList,
+            purposeCategory = combinedNote,
+            totalAmountToman = newTotal,
+            userShareToman = newTotal,
+            manualAmountText = PersianNumberUtils.formatToman(newTotal)
+        )
+    }
+
     private fun parseAndUpdateVoiceState(speech: String, targetTx: TransactionEntity?) {
         val defaultBank = targetTx?.shortBankName ?: "نقدی / دستی"
         val multiItems = PersianVoiceSlangParserEngine.parseMultiVoiceCommands(
             rawSpeech = speech,
-            defaultBankName = defaultBank
+            defaultBankName = defaultBank,
+            fallbackTotalToman = targetTx?.totalAmountToman
         )
         val parsed = PersianVoiceSlangParserEngine.parseVoiceCommand(
             rawSpeech = speech,
             fallbackTotalToman = targetTx?.totalAmountToman,
             defaultBankName = defaultBank
         )
-        val currentManualTyped = PersianNumberUtils.toEnglishDigits(_voiceState.value.manualAmountText)
-            .replace(",", "")
-            .replace("٬", "")
-            .trim()
-            .toLongOrNull() ?: 0L
+        val currentManualTyped = PersianNumberUtils.parseAmountInputToLong(_voiceState.value.manualAmountText) ?: 0L
 
         val effectiveTotal = when {
             targetTx != null -> targetTx.totalAmountToman
@@ -513,26 +552,28 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
             val v = _voiceState.value
             val targetTx = v.targetUntaggedTransaction
 
-            // Check if the user spoke a multi-clause sentence (e.g. "۵۰۰ هزار نانوایی و ۳۰۰ هزار شارژ ایرانسل خریدم")
-            val multiItems = PersianVoiceSlangParserEngine.parseMultiVoiceCommands(
-                rawSpeech = v.recognizedText,
-                defaultBankName = targetTx?.shortBankName ?: "نقدی / دستی"
-            )
-            if (targetTx == null && multiItems.size > 1) {
-                repository.confirmMultiVoiceExpenses(multiItems)
-                val countFa = PersianNumberUtils.toPersianDigits(multiItems.size.toString())
-                val combinedSummary = PersianVoiceSlangParserEngine.formatCombinedMultiVoiceNote(multiItems)
+            // Check if user has multi-clause items (including any inline edits made in the Voice Sheet)
+            val activeMultiItems = if (v.parsedMultiItems.size > 1) {
+                v.parsedMultiItems.filter { it.totalAmountToman > 0L && it.purposeCategory.isNotBlank() }
+            } else {
+                PersianVoiceSlangParserEngine.parseMultiVoiceCommands(
+                    rawSpeech = v.recognizedText,
+                    defaultBankName = targetTx?.shortBankName ?: "نقدی / دستی",
+                    fallbackTotalToman = targetTx?.totalAmountToman
+                )
+            }
+
+            if (targetTx == null && activeMultiItems.size > 1) {
+                repository.confirmMultiVoiceExpenses(activeMultiItems)
+                val countFa = PersianNumberUtils.toPersianDigits(activeMultiItems.size.toString())
+                val combinedSummary = PersianVoiceSlangParserEngine.formatCombinedMultiVoiceNote(activeMultiItems)
                 _showVoiceOverlaySheet.value = false
                 _voiceState.value = VoiceUiState()
                 showBanner("$countFa تراکنش مجزا ثبت شد: $combinedSummary ✓")
                 return@launch
             }
 
-            val typedManualAmount = PersianNumberUtils.toEnglishDigits(v.manualAmountText)
-                .replace(",", "")
-                .replace("٬", "")
-                .trim()
-                .toLongOrNull()
+            val typedManualAmount = PersianNumberUtils.parseAmountInputToLong(v.manualAmountText)
                 ?: PersianVoiceSlangParserEngine.parseSpokenPersianAmountToman(v.manualAmountText)
 
             val parsedFromSpeech = PersianVoiceSlangParserEngine.parseVoiceCommand(
@@ -543,13 +584,17 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
 
             val finalTotalAmount = when {
                 targetTx != null -> targetTx.totalAmountToman
+                typedManualAmount > 0L -> typedManualAmount
                 parsedFromSpeech.totalAmountToman > 0L -> parsedFromSpeech.totalAmountToman
-                else -> typedManualAmount
+                else -> 0L
             }
 
-            val finalPurpose = parsedFromSpeech.purposeCategory
-                .ifBlank { v.purposeCategory }
-                .trim()
+            val finalPurpose = when {
+                targetTx != null && activeMultiItems.size > 1 ->
+                    PersianVoiceSlangParserEngine.formatCombinedMultiVoiceNote(activeMultiItems)
+                v.purposeCategory.isNotBlank() -> v.purposeCategory.trim()
+                else -> parsedFromSpeech.purposeCategory.trim()
+            }
 
             if (finalPurpose.isBlank()) {
                 showBanner("لطفاً توضیح تراکنش را بگویید یا بنویسید (مثلاً: ۷۰ تومن نانوایی).")
@@ -628,17 +673,23 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * Triggered when the user taps "پاکسازی و بازخوانی تمیز پیامک‌های واقعی" in the status modal.
+     * Shows a sleek loading indicator (`isSyncingSms = true`) instead of flashing 0 Toman.
      */
     fun cleanPurgeAndRescanRealSms() {
         viewModelScope.launch {
-            val count = repository.cleanPurgeAndRescanRealSms(appContext)
-            syncInitialSelectedMonthWithTransactions()
             _showSmsSimulatorModal.value = false
-            val countStr = PersianNumberUtils.toPersianDigits(count.toString())
-            if (count > 0) {
-                showBanner("پاکسازی انجام شد و $countStr پیامک واقعی بانک با مانده حساب‌ها بازخوانی شد ✓")
-            } else {
-                showBanner("پاکسازی و بازخوانی تمیز پیامک‌های بانکی انجام شد ✓")
+            _isSyncingSms.value = true
+            try {
+                val count = repository.cleanPurgeAndRescanRealSms(appContext)
+                syncInitialSelectedMonthWithTransactions()
+                val countStr = PersianNumberUtils.toPersianDigits(count.toString())
+                if (count > 0) {
+                    showBanner("پاکسازی انجام شد و $countStr پیامک واقعی بانک با مانده حساب‌ها بازخوانی شد ✓")
+                } else {
+                    showBanner("پاکسازی و بازخوانی تمیز پیامک‌های بانکی انجام شد ✓")
+                }
+            } finally {
+                _isSyncingSms.value = false
             }
         }
     }

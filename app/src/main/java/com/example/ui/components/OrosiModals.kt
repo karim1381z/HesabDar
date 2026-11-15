@@ -83,8 +83,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -115,12 +118,22 @@ import com.example.ui.theme.SaffronGoldBright
 import com.example.ui.theme.SaffronGoldLight
 import kotlin.math.sin
 
+private fun formatAmountTextFieldValue(newValue: TextFieldValue): TextFieldValue {
+    val formatted = PersianNumberUtils.formatLiveAmountInput(newValue.text)
+    return TextFieldValue(
+        text = formatted,
+        selection = TextRange(formatted.length)
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VoiceOverlayBottomSheet(
     voiceState: VoiceUiState,
     onSpeechChange: (String) -> Unit,
     onManualAmountChange: (String) -> Unit = {},
+    onPurposeChange: (String) -> Unit = {},
+    onUpdateMultiItem: (index: Int, newTitle: String, newAmountStr: String) -> Unit = { _, _, _ -> },
     onSimulateVoiceRecord: () -> Unit,
     onConfirmVoiceEntry: () -> Unit,
     onDismiss: () -> Unit
@@ -521,9 +534,10 @@ fun VoiceOverlayBottomSheet(
             Spacer(modifier = Modifier.height(12.dp))
 
             val multiItems = voiceState.parsedMultiItems
-            val isMultiNewMode = targetTx == null && multiItems.size > 1
+            val hasMultiItems = multiItems.size > 1
+            val isMultiNewMode = targetTx == null && hasMultiItems
 
-            // Live Auto-Extracted Summary Card: "عنوان / بابت" and "مبلغ (تومان)" or Multi-Item Preview List
+            // Live Auto-Extracted Summary Card: Editable Multi-Item List OR Single Item Editable Fields
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -531,50 +545,86 @@ fun VoiceOverlayBottomSheet(
                     .background(OrosiSurfaceHigh)
                     .border(1.dp, NishapurTurquoiseBright.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
                     .padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                if (isMultiNewMode) {
+                if (hasMultiItems) {
                     Text(
-                        text = "${PersianNumberUtils.toPersianDigits(multiItems.size.toString())} تراکنش مجزا تشخیص داده شد:",
+                        text = if (targetTx != null) {
+                            "${PersianNumberUtils.toPersianDigits(multiItems.size.toString())} مورد از مبلغ بانک تفکیک شد (قابل ویرایش):"
+                        } else {
+                            "${PersianNumberUtils.toPersianDigits(multiItems.size.toString())} تراکنش مجزا تشخیص داده شد (قابل ویرایش):"
+                        },
                         style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.ExtraBold),
                         color = NishapurTurquoiseSoft,
                         modifier = Modifier.testTag("recognized_speech_text")
                     )
 
                     multiItems.forEachIndexed { idx, item ->
+                        var itemAmountField by remember(idx, item.amountToman) {
+                            val formatted = PersianNumberUtils.formatLiveAmountInput(item.amountToman.toString())
+                            mutableStateOf(
+                                TextFieldValue(
+                                    text = formatted,
+                                    selection = TextRange(formatted.length)
+                                )
+                            )
+                        }
+
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(12.dp))
                                 .background(OrosiSurfaceContainer)
                                 .border(1.dp, OrosiHairline, RoundedCornerShape(12.dp))
-                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                                .padding(horizontal = 10.dp, vertical = 8.dp)
                                 .testTag("multi_voice_item_$idx"),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.Bottom
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "${PersianNumberUtils.toPersianDigits((idx + 1).toString())}. ${item.title}",
-                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = AlabasterSilk
+                            OutlinedTextField(
+                                value = item.purposeCategory,
+                                onValueChange = { newTitle ->
+                                    onUpdateMultiItem(idx, newTitle, itemAmountField.text)
+                                },
+                                label = {
+                                    Text(
+                                        text = "عنوان مورد ${PersianNumberUtils.toPersianDigits((idx + 1).toString())}",
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                },
+                                singleLine = true,
+                                modifier = Modifier
+                                    .weight(1.25f)
+                                    .testTag("multi_voice_item_title_$idx"),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = NishapurTurquoiseBright,
+                                    unfocusedBorderColor = OrosiHairline
                                 )
-                                val subtitleParts = buildList {
-                                    add(item.category)
-                                    if (item.merchant.isNotBlank() && item.merchant != item.title) {
-                                        add(item.merchant)
-                                    }
-                                }
-                                Text(
-                                    text = subtitleParts.joinToString(" • "),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = OrosiOnSurfaceVariant
+                            )
+
+                            OutlinedTextField(
+                                value = itemAmountField,
+                                onValueChange = { newVal ->
+                                    val formattedVal = formatAmountTextFieldValue(newVal)
+                                    itemAmountField = formattedVal
+                                    onUpdateMultiItem(idx, item.purposeCategory, formattedVal.text)
+                                },
+                                label = {
+                                    Text(
+                                        text = "مبلغ (تومان)",
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                },
+                                singleLine = true,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("multi_voice_item_amount_$idx"),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = SaffronGoldLight,
+                                    unfocusedBorderColor = OrosiHairline
                                 )
-                            }
-                            Text(
-                                text = PersianNumberUtils.formatToman(item.amountToman, showUnit = true),
-                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.ExtraBold),
-                                color = SaffronGoldLight
                             )
                         }
                     }
@@ -587,12 +637,16 @@ fun VoiceOverlayBottomSheet(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "جمع کل مبالغ:",
+                            text = if (targetTx != null) "عنوان ترکیبی ثبت‌شده:" else "جمع کل مبالغ:",
                             style = MaterialTheme.typography.bodySmall,
                             color = OrosiOnSurfaceVariant
                         )
                         Text(
-                            text = PersianNumberUtils.formatToman(voiceState.totalAmountToman, showUnit = true),
+                            text = if (targetTx != null) {
+                                voiceState.purposeCategory
+                            } else {
+                                PersianNumberUtils.formatToman(voiceState.totalAmountToman, showUnit = true)
+                            },
                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.ExtraBold),
                             color = NishapurTurquoiseSoft
                         )
@@ -617,28 +671,85 @@ fun VoiceOverlayBottomSheet(
                         )
                     }
 
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("voice_manual_amount_input"),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "مبلغ (تومان):",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = OrosiOnSurfaceVariant
-                        )
-                        val displayAmount = if (voiceState.totalAmountToman > 0L) {
-                            PersianNumberUtils.formatToman(voiceState.totalAmountToman, showUnit = true)
-                        } else {
-                            "۰ تومان"
+                    if (targetTx == null) {
+                        var singleAmountField by remember(voiceState.manualAmountText) {
+                            val formatted = PersianNumberUtils.formatLiveAmountInput(voiceState.manualAmountText)
+                            mutableStateOf(
+                                TextFieldValue(
+                                    text = formatted,
+                                    selection = TextRange(formatted.length)
+                                )
+                            )
                         }
-                        Text(
-                            text = displayAmount,
-                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.ExtraBold),
-                            color = if (voiceState.totalAmountToman > 0L) SaffronGoldLight else RubyRoseSoft
-                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.Bottom
+                        ) {
+                            OutlinedTextField(
+                                value = voiceState.purposeCategory,
+                                onValueChange = onPurposeChange,
+                                label = {
+                                    Text(
+                                        text = "عنوان / بابت (قابل ویرایش)",
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                },
+                                singleLine = true,
+                                modifier = Modifier
+                                    .weight(1.2f)
+                                    .testTag("voice_editable_title_input"),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = NishapurTurquoiseBright,
+                                    unfocusedBorderColor = OrosiHairline
+                                )
+                            )
+
+                            OutlinedTextField(
+                                value = singleAmountField,
+                                onValueChange = { newVal ->
+                                    val formattedVal = formatAmountTextFieldValue(newVal)
+                                    singleAmountField = formattedVal
+                                    onManualAmountChange(formattedVal.text)
+                                },
+                                label = {
+                                    Text(
+                                        text = "مبلغ (تومان)",
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                },
+                                singleLine = true,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("voice_manual_amount_input"),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = SaffronGoldLight,
+                                    unfocusedBorderColor = OrosiHairline
+                                )
+                            )
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("voice_manual_amount_input"),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "مبلغ (تومان):",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = OrosiOnSurfaceVariant
+                            )
+                            Text(
+                                text = PersianNumberUtils.formatToman(voiceState.totalAmountToman, showUnit = true),
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.ExtraBold),
+                                color = SaffronGoldLight
+                            )
+                        }
                     }
                 }
             }
@@ -865,8 +976,9 @@ fun CommitmentActionBottomSheet(
 ) {
     var titleStr by remember(commitment) { mutableStateOf(commitment.title) }
     var counterpartyStr by remember(commitment) { mutableStateOf(commitment.counterparty) }
-    var amountStr by remember(commitment) {
-        mutableStateOf(PersianNumberUtils.formatToman(commitment.amountToman))
+    var amountField by remember(commitment) {
+        val formatted = PersianNumberUtils.formatToman(commitment.amountToman)
+        mutableStateOf(TextFieldValue(text = formatted, selection = TextRange(formatted.length)))
     }
     var dueDateStr by remember(commitment) { mutableStateOf(commitment.dueDateStr) }
 
@@ -909,7 +1021,7 @@ fun CommitmentActionBottomSheet(
 
             Button(
                 onClick = {
-                    val parsedAmount = PersianNumberUtils.toEnglishDigits(amountStr).toLongOrNull()
+                    val parsedAmount = PersianNumberUtils.parseAmountInputToLong(amountField.text)
                         ?: commitment.amountToman
                     onSaveCommitment(
                         titleStr,
@@ -943,15 +1055,15 @@ fun CommitmentActionBottomSheet(
             OutlinedTextField(
                 value = titleStr,
                 onValueChange = { titleStr = it },
-                label = { Text("عنوان چک، قسط یا دُنگ") },
+                label = { Text("عنوان چک، قسط یا دُنگ", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedTextField(
-                value = amountStr,
-                onValueChange = { amountStr = PersianNumberUtils.toPersianDigits(it) },
-                label = { Text("مبلغ (تومان)") },
+                value = amountField,
+                onValueChange = { amountField = formatAmountTextFieldValue(it) },
+                label = { Text("مبلغ (تومان)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
@@ -959,7 +1071,7 @@ fun CommitmentActionBottomSheet(
             OutlinedTextField(
                 value = dueDateStr,
                 onValueChange = { dueDateStr = PersianNumberUtils.toPersianDigits(it) },
-                label = { Text("تاریخ سررسید") },
+                label = { Text("تاریخ سررسید", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
@@ -967,7 +1079,7 @@ fun CommitmentActionBottomSheet(
             OutlinedTextField(
                 value = counterpartyStr,
                 onValueChange = { counterpartyStr = it },
-                label = { Text("طرف حساب / بانک") },
+                label = { Text("طرف حساب / بانک", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
@@ -1001,7 +1113,7 @@ fun CommitmentActionBottomSheet(
 
                 Button(
                     onClick = {
-                        val parsedAmount = PersianNumberUtils.toEnglishDigits(amountStr).toLongOrNull()
+                        val parsedAmount = PersianNumberUtils.parseAmountInputToLong(amountField.text)
                             ?: commitment.amountToman
                         onSaveCommitment(
                             titleStr,
@@ -1059,16 +1171,24 @@ fun TransactionDetailAndEditBottomSheet(
         JalaliCalendarUtils.fromTimestamp(transaction.timestamp)
     }
 
-    var amountStr by remember(transaction) {
+    var amountField by remember(transaction) {
+        val formatted = PersianNumberUtils.formatToman(
+            transaction.userShareToman.takeIf { it > 0L } ?: transaction.totalAmountToman
+        )
         mutableStateOf(
-            PersianNumberUtils.formatToman(
-                transaction.userShareToman.takeIf { it > 0L } ?: transaction.totalAmountToman
+            TextFieldValue(
+                text = formatted,
+                selection = TextRange(formatted.length)
             )
         )
     }
-    var balanceAfterStr by remember(transaction) {
+    var balanceAfterField by remember(transaction) {
+        val formatted = transaction.balanceAfterToman?.let { PersianNumberUtils.formatToman(it) } ?: ""
         mutableStateOf(
-            transaction.balanceAfterToman?.let { PersianNumberUtils.formatToman(it) } ?: ""
+            TextFieldValue(
+                text = formatted,
+                selection = TextRange(formatted.length)
+            )
         )
     }
     var purposeStr by remember(transaction) {
@@ -1200,11 +1320,11 @@ fun TransactionDetailAndEditBottomSheet(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // 1) مبلغ (تومان)
+            // 1) مبلغ (تومان) - Live 3-digit comma formatting with cursor at end
             OutlinedTextField(
-                value = amountStr,
-                onValueChange = { amountStr = PersianNumberUtils.toPersianDigits(it) },
-                label = { Text("مبلغ (تومان)") },
+                value = amountField,
+                onValueChange = { amountField = formatAmountTextFieldValue(it) },
+                label = { Text("مبلغ (تومان)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("detail_amount_input"),
@@ -1217,11 +1337,11 @@ fun TransactionDetailAndEditBottomSheet(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // 2) مانده حساب پس از تراکنش (تومان)
+            // 2) مانده حساب پس از تراکنش (تومان) - Live 3-digit comma formatting with cursor at end
             OutlinedTextField(
-                value = balanceAfterStr,
-                onValueChange = { balanceAfterStr = PersianNumberUtils.toPersianDigits(it) },
-                label = { Text("مانده حساب پس از تراکنش (تومان)") },
+                value = balanceAfterField,
+                onValueChange = { balanceAfterField = formatAmountTextFieldValue(it) },
+                label = { Text("مانده حساب پس از تراکنش (تومان)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 placeholder = { Text("مثلاً: ۹۸۴,۴۳۳") },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1380,11 +1500,14 @@ fun TransactionDetailAndEditBottomSheet(
 
             Button(
                 onClick = {
-                    val parsedAmount = PersianNumberUtils.toEnglishDigits(amountStr).toLongOrNull()
+                    val parsedAmount = PersianNumberUtils.parseAmountInputToLong(amountField.text)
                         ?: transaction.totalAmountToman
-                    val parsedBalanceAfter = PersianNumberUtils.toEnglishDigits(balanceAfterStr)
-                        .toLongOrNull()
-                        ?: transaction.balanceAfterToman
+                    val parsedBalanceAfter = if (balanceAfterField.text.isBlank()) {
+                        null
+                    } else {
+                        PersianNumberUtils.parseAmountInputToLong(balanceAfterField.text)
+                            ?: transaction.balanceAfterToman
+                    }
                     onSaveEdits(
                         parsedAmount,
                         parsedBalanceAfter,
@@ -1449,7 +1572,7 @@ fun AddBankAccountBottomSheet(
     onDismiss: () -> Unit
 ) {
     var bankName by remember { mutableStateOf("") }
-    var balanceStr by remember { mutableStateOf("") }
+    var balanceField by remember { mutableStateOf(TextFieldValue("")) }
     var cardLast4 by remember { mutableStateOf("") }
     var isTankhah by remember { mutableStateOf(true) }
 
@@ -1500,7 +1623,7 @@ fun AddBankAccountBottomSheet(
             OutlinedTextField(
                 value = bankName,
                 onValueChange = { bankName = it },
-                label = { Text("نام بانک یا منبع مالی (مثلاً: ملت، ویپاد، کیف پول)") },
+                label = { Text("نام بانک یا منبع مالی (مثلاً: ملت، ویپاد، کیف پول)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("add_account_name_input"),
@@ -1508,9 +1631,9 @@ fun AddBankAccountBottomSheet(
             )
 
             OutlinedTextField(
-                value = balanceStr,
-                onValueChange = { balanceStr = PersianNumberUtils.toPersianDigits(it) },
-                label = { Text("موجودی فعلی (تومان)") },
+                value = balanceField,
+                onValueChange = { balanceField = formatAmountTextFieldValue(it) },
+                label = { Text("موجودی فعلی (تومان)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 placeholder = { Text("مثلاً: ۲,۵۰۰,۰۰۰") },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1521,7 +1644,7 @@ fun AddBankAccountBottomSheet(
             OutlinedTextField(
                 value = cardLast4,
                 onValueChange = { cardLast4 = PersianNumberUtils.toPersianDigits(it) },
-                label = { Text("۴ رقم آخر کارت (اختیاری)") },
+                label = { Text("۴ رقم آخر کارت (اختیاری)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
@@ -1553,7 +1676,7 @@ fun AddBankAccountBottomSheet(
             Button(
                 onClick = {
                     val cleanBank = bankName.trim().ifEmpty { "حساب جدید" }
-                    val parsedBalance = PersianNumberUtils.toEnglishDigits(balanceStr).toLongOrNull() ?: 0L
+                    val parsedBalance = PersianNumberUtils.parseAmountInputToLong(balanceField.text) ?: 0L
                     onAddAccount(cleanBank, parsedBalance, isTankhah, cardLast4)
                 },
                 shape = RoundedCornerShape(16.dp),
@@ -1692,6 +1815,7 @@ fun PaydayAndBackupBottomSheet(
     settings: AppSettingsEntity,
     backupJsonText: String,
     onSaveSettings: (Int, String, Boolean, Long, Long) -> Unit,
+    onSetTankhahModeEnabled: (Boolean) -> Unit = {},
     onImportBackup: (String) -> Unit,
     onResetDefault: () -> Unit,
     onDismiss: () -> Unit
@@ -1701,8 +1825,9 @@ fun PaydayAndBackupBottomSheet(
         mutableStateOf(PersianNumberUtils.toPersianDigits(settings.paydayStartDay.toString()))
     }
     var autoDetectSalary by remember(settings) { mutableStateOf(settings.autoDetectSalary) }
-    var dailySafeStr by remember(settings) {
-        mutableStateOf(PersianNumberUtils.toPersianDigits(settings.dailySafeBudgetToman.toString()))
+    var dailySafeField by remember(settings) {
+        val formatted = PersianNumberUtils.formatToman(settings.dailySafeBudgetToman)
+        mutableStateOf(TextFieldValue(text = formatted, selection = TextRange(formatted.length)))
     }
     var editableBackupJson by remember(backupJsonText) { mutableStateOf(backupJsonText) }
     var showBackupBox by remember { mutableStateOf(false) }
@@ -1747,7 +1872,8 @@ fun PaydayAndBackupBottomSheet(
             OutlinedTextField(
                 value = cycleLabel,
                 onValueChange = { cycleLabel = it },
-                label = { Text("بازه ماه حقوقی") },
+                label = { Text("بازه ماه حقوقی", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = NishapurTurquoiseBright,
@@ -1757,14 +1883,23 @@ fun PaydayAndBackupBottomSheet(
 
             Spacer(modifier = Modifier.height(10.dp))
 
+            // Rule 1: Side-by-Side Inputs with single-line labels and Alignment.Bottom
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.Bottom
             ) {
                 OutlinedTextField(
                     value = paydayDayStr,
                     onValueChange = { paydayDayStr = PersianNumberUtils.toPersianDigits(it) },
-                    label = { Text("روز واریز حقوق") },
+                    label = {
+                        Text(
+                            text = "روز واریز حقوق",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    },
+                    singleLine = true,
                     modifier = Modifier.weight(1f),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = NishapurTurquoiseBright,
@@ -1773,14 +1908,50 @@ fun PaydayAndBackupBottomSheet(
                 )
 
                 OutlinedTextField(
-                    value = dailySafeStr,
-                    onValueChange = { dailySafeStr = PersianNumberUtils.toPersianDigits(it) },
-                    label = { Text("سهم خرج روزانه (تومان)") },
-                    modifier = Modifier.weight(1.4f),
+                    value = dailySafeField,
+                    onValueChange = { dailySafeField = formatAmountTextFieldValue(it) },
+                    label = {
+                        Text(
+                            text = "بودجه روزانه (تومان)",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    },
+                    singleLine = true,
+                    modifier = Modifier.weight(1.35f),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = NishapurTurquoiseBright,
                         unfocusedBorderColor = OrosiHairline
                     )
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(OrosiSurfaceContainer)
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "فعالسازی حالت حساب تنخواه (تفکیک خرج روزمره از پس‌انداز)",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = AlabasterSilk,
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Switch(
+                    checked = settings.tankhahModeEnabled,
+                    onCheckedChange = onSetTankhahModeEnabled,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = AlabasterSilk,
+                        checkedTrackColor = NishapurTurquoise
+                    ),
+                    modifier = Modifier.testTag("settings_enable_tankhah_mode_switch")
                 )
             }
 
@@ -1816,7 +1987,7 @@ fun PaydayAndBackupBottomSheet(
             Button(
                 onClick = {
                     val day = PersianNumberUtils.toEnglishDigits(paydayDayStr).toIntOrNull() ?: 1
-                    val dailySafe = PersianNumberUtils.toEnglishDigits(dailySafeStr).toLongOrNull() ?: 680_000L
+                    val dailySafe = PersianNumberUtils.parseAmountInputToLong(dailySafeField.text) ?: 680_000L
                     onSaveSettings(day, cycleLabel, autoDetectSalary, settings.goldPrice18kToman, dailySafe)
                 },
                 shape = RoundedCornerShape(14.dp),
@@ -1923,7 +2094,7 @@ fun AddCommitmentBottomSheet(
     var isReceivableDong by remember { mutableStateOf(true) } // true = طلب دارم (به من بدهکار است), false = بدهی دارم (من بدهکارم)
     var title by remember { mutableStateOf("") }
     var counterparty by remember { mutableStateOf("") }
-    var amountStr by remember { mutableStateOf("") }
+    var amountField by remember { mutableStateOf(TextFieldValue("")) }
     var dueDateStr by remember { mutableStateOf("") }
     var sayyadId by remember { mutableStateOf("") }
 
@@ -2049,30 +2220,34 @@ fun AddCommitmentBottomSheet(
             OutlinedTextField(
                 value = title,
                 onValueChange = { title = it },
-                label = { Text("عنوان (مثلاً: چک اجاره، قسط وام، دنگ شام)") },
+                label = { Text("عنوان (مثلاً: چک اجاره، قسط وام، دنگ شام)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedTextField(
-                value = amountStr,
-                onValueChange = { amountStr = PersianNumberUtils.toPersianDigits(it) },
-                label = { Text("مبلغ (تومان)") },
+                value = amountField,
+                onValueChange = { amountField = formatAmountTextFieldValue(it) },
+                label = { Text("مبلغ (تومان)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 placeholder = { Text("مثلاً: ۱۲,۰۰۰,۰۰۰") },
+                singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedTextField(
                 value = dueDateStr,
                 onValueChange = { dueDateStr = PersianNumberUtils.toPersianDigits(it) },
-                label = { Text("تاریخ سررسید (مثلاً: ۳۰ آبان ۱۴۰۵)") },
+                label = { Text("تاریخ سررسید (مثلاً: ۳۰ آبان ۱۴۰۵)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 placeholder = { Text("مثلاً: ۳۰ آبان ۱۴۰۵") },
+                singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedTextField(
                 value = counterparty,
                 onValueChange = { counterparty = it },
-                label = { Text(if (category == "DONG") "نام دوست / طرف حساب" else "طرف حساب / بانک") },
+                label = { Text(if (category == "DONG") "نام دوست / طرف حساب" else "طرف حساب / بانک", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
 
@@ -2080,7 +2255,7 @@ fun AddCommitmentBottomSheet(
 
             Button(
                 onClick = {
-                    val amount = PersianNumberUtils.toEnglishDigits(amountStr).toLongOrNull() ?: 5_000_000L
+                    val amount = PersianNumberUtils.parseAmountInputToLong(amountField.text) ?: 5_000_000L
                     val baseTitle = title.trim().ifEmpty {
                         when (category) {
                             "DONG" -> if (isReceivableDong) "طلب دُنگ" else "بدهی دُنگ"

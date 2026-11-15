@@ -21,8 +21,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.outlined.ArrowDownward
 import androidx.compose.material.icons.outlined.ArrowUpward
@@ -146,7 +146,8 @@ fun TransactionsScreen(
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // 1. Month Selector Header (< آبان ۱۴۰۵ >)
+        // 1. Month Selector Header: in RTL, the first item is on the RIGHT (points RIGHT >)
+        // and the last item is on the LEFT (points LEFT <)
         item {
             Row(
                 modifier = Modifier
@@ -159,6 +160,7 @@ fun TransactionsScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // RIGHT side button in RTL: points RIGHT (>)
                 IconButton(
                     onClick = { onChangeMonth(-1) },
                     modifier = Modifier
@@ -168,7 +170,7 @@ fun TransactionsScreen(
                         .testTag("prev_month_button")
                 ) {
                     Icon(
-                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        imageVector = Icons.Default.ChevronRight,
                         contentDescription = "ماه قبل",
                         tint = AlabasterSilk
                     )
@@ -181,6 +183,7 @@ fun TransactionsScreen(
                     modifier = Modifier.testTag("selected_month_label")
                 )
 
+                // LEFT side button in RTL: points LEFT (<)
                 IconButton(
                     onClick = { if (!isNextMonthDisabled) onChangeMonth(1) },
                     enabled = !isNextMonthDisabled,
@@ -192,7 +195,7 @@ fun TransactionsScreen(
                         .testTag("next_month_button")
                 ) {
                     Icon(
-                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                        imageVector = Icons.Default.ChevronLeft,
                         contentDescription = "ماه بعد",
                         tint = if (isNextMonthDisabled) OrosiOnSurfaceVariant else AlabasterSilk
                     )

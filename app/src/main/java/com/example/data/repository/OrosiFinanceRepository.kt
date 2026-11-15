@@ -28,7 +28,7 @@ class OrosiFinanceRepository(
 ) {
 
     companion object {
-        const val PREFS_NAME = "orosi_offline_db_v10_clean"
+        const val PREFS_NAME = "orosi_offline_db_v11_clean"
         private val smsSyncMutex = Mutex()
 
         private val demoStoreNames = setOf(
@@ -157,7 +157,8 @@ class OrosiFinanceRepository(
                     goldGrams = 11.12,
                     dailyAutoSaveEnabled = true,
                     hideAmounts = false,
-                    onlyTankhahMode = true
+                    onlyTankhahMode = true,
+                    tankhahModeEnabled = false
                 )
             )
         }
@@ -463,7 +464,7 @@ class OrosiFinanceRepository(
         val allTxs = dao.getAllTransactionsNow()
         val allCommitments = dao.getAllCommitmentsNow()
 
-        val activeAccounts = if (currentSettings.onlyTankhahMode) {
+        val activeAccounts = if (currentSettings.tankhahModeEnabled && currentSettings.onlyTankhahMode) {
             allAccounts.filter { it.isTankhah }
         } else {
             allAccounts
@@ -655,6 +656,7 @@ class OrosiFinanceRepository(
             )
 
             val discoveredBanks = linkedMapOf<String, DiscoveredBankState>()
+            val newTransactionsBatch = mutableListOf<TransactionEntity>()
 
             try {
                 val projection = arrayOf(
@@ -689,13 +691,14 @@ class OrosiFinanceRepository(
                     while (c.moveToNext() && rowsRead < 3000) {
                         rowsRead++
                         val senderAddress = if (addrIdx >= 0) c.getString(addrIdx).orEmpty().trim() else ""
-                        val body = if (bodyIdx >= 0) c.getString(bodyIdx).orEmpty().trim() else ""
-                        val timestampMillis = if (dateIdx >= 0) c.getLong(dateIdx) else System.currentTimeMillis()
+                        if (senderAddress.isBlank()) continue
 
-                        if (senderAddress.isBlank() || body.isBlank()) continue
-
-                        // Step 1: Resolve bank strictly from senderAddress via JibemanSmsEngine
+                        // Step 1: Fast pre-filter strictly from senderAddress via JibemanSmsEngine BEFORE reading/parsing body
                         val bankProfile = JibemanSmsEngine.resolveBank(senderAddress) ?: continue
+                        val body = if (bodyIdx >= 0) c.getString(bodyIdx).orEmpty().trim() else ""
+                        if (body.isBlank()) continue
+
+                        val timestampMillis = if (dateIdx >= 0) c.getLong(dateIdx) else System.currentTimeMillis()
                         val bankName = bankProfile.nameFa
                         foundAnyRealBankSms = true
 
@@ -754,7 +757,7 @@ class OrosiFinanceRepository(
                         val txType = if (isDeposit) "INCOME" else "EXPENSE"
                         val prevTagged = savedCustomTagsBySmsKey["$bankName|$amountToman|$timestampMillis"]
 
-                        dao.insertTransaction(
+                        newTransactionsBatch.add(
                             TransactionEntity(
                                 title = prevTagged?.title ?: fullResult.detectedTitle,
                                 storeName = bankName,
@@ -778,6 +781,9 @@ class OrosiFinanceRepository(
                         importedKeys.add(uniqueDedupKey)
                         importedCount++
                     }
+                }
+                if (newTransactionsBatch.isNotEmpty()) {
+                    dao.insertTransactions(newTransactionsBatch)
                 }
             } catch (_: SecurityException) {
                 // Permission not yet granted
@@ -1100,6 +1106,18 @@ class OrosiFinanceRepository(
         persistSnapshotToSharedPrefs()
     }
 
+    suspend fun setTankhahModeEnabled(enabled: Boolean) {
+        val current = dao.getSettingsNow() ?: AppSettingsEntity()
+        dao.saveSettings(
+            current.copy(
+                tankhahModeEnabled = enabled,
+                onlyTankhahMode = if (enabled) true else current.onlyTankhahMode
+            )
+        )
+        recalculateRealSafeToSpend()
+        persistSnapshotToSharedPrefs()
+    }
+
     suspend fun toggleAccountTankhah(bankName: String) {
         val account = dao.getBankAccountByName(bankName) ?: return
         dao.upsertBankAccount(account.copy(isTankhah = !account.isTankhah))
@@ -1325,6 +1343,7 @@ class OrosiFinanceRepository(
             put("autoDetectSalary", settings.autoDetectSalary)
             put("hideAmounts", settings.hideAmounts)
             put("onlyTankhahMode", settings.onlyTankhahMode)
+            put("tankhahModeEnabled", settings.tankhahModeEnabled)
         }
         root.put("settings", settingsObj)
 
@@ -1412,7 +1431,8 @@ class OrosiFinanceRepository(
                         paydayCycleLabel = sObj.optString("paydayCycleLabel", "۱ آبان تا ۳۰ آبان"),
                         autoDetectSalary = sObj.optBoolean("autoDetectSalary", true),
                         hideAmounts = sObj.optBoolean("hideAmounts", false),
-                        onlyTankhahMode = sObj.optBoolean("onlyTankhahMode", false)
+                        onlyTankhahMode = sObj.optBoolean("onlyTankhahMode", true),
+                        tankhahModeEnabled = sObj.optBoolean("tankhahModeEnabled", false)
                     )
                 )
             }

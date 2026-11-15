@@ -216,4 +216,46 @@ class ExampleUnitTest {
         assertEquals(800_000L, taggedCombined.totalAmountToman)
         assertEquals("بلو", taggedCombined.storeName)
     }
+
+    @Test
+    fun testItemQuantitiesAndRemainderMathAndSingleTotalMultiItems() {
+        // Bug A & C: "یک شارژ ایرانسل و دو تا سیب زمینی خریدم ۵۰ هزار تومان" in "+ ثبت صوتی"
+        // Must NOT split into 1,000 Toman and 2,000 Toman items; must keep quantities in title and total = 50,000
+        val singleTotalCommand = PersianVoiceSlangParserEngine.parseVoiceCommand(
+            rawSpeech = "یک شارژ ایرانسل و دو تا سیب زمینی خریدم ۵۰ هزار تومان",
+            fallbackTotalToman = null,
+            defaultBankName = "نقدی / دستی"
+        )
+        assertEquals(50_000L, singleTotalCommand.totalAmountToman)
+        assertEquals("۱ شارژ ایرانسل و ۲ تا سیب‌زمینی", singleTotalCommand.purposeCategory)
+
+        val multiCheck = PersianVoiceSlangParserEngine.parseMultiVoiceCommands(
+            rawSpeech = "یک شارژ ایرانسل و دو تا سیب زمینی خریدم ۵۰ هزار تومان"
+        )
+        // Because only one clause has an explicit currency amount, it is NOT a multi-amount split
+        assertEquals(1, multiCheck.size)
+        assertEquals(50_000L, multiCheck[0].amountToman)
+        assertEquals("۱ شارژ ایرانسل و ۲ تا سیب‌زمینی", multiCheck[0].title)
+
+        // Bug B: Tagging an existing 100,000 Toman bank transaction via "بگو بابت چی؟"
+        // User says: "سلام دو تا شارژ خریدم دو تا بستنی ۵۰ هزار تومان"
+        // Part 2 ("۲ تا بستنی") = 50,000; Part 1 ("۲ تا شارژ") = 100,000 - 50,000 = 50,000!
+        val remainderTagged = PersianVoiceSlangParserEngine.parseVoiceCommand(
+            rawSpeech = "سلام دو تا شارژ خریدم دو تا بستنی ۵۰ هزار تومان",
+            fallbackTotalToman = 100_000L,
+            defaultBankName = "بلو"
+        )
+        assertEquals("۲ تا شارژ (۵۰,۰۰۰) + ۲ تا بستنی (۵۰,۰۰۰)", remainderTagged.purposeCategory)
+        assertEquals(100_000L, remainderTagged.totalAmountToman)
+        assertEquals("بلو", remainderTagged.storeName)
+    }
+
+    @Test
+    fun testLiveAmountCommaFormattingAndParsing() {
+        assertEquals("۱۰۰,۰۰۰", PersianNumberUtils.formatLiveAmountInput("100000"))
+        assertEquals("۱۰,۰۰۰", PersianNumberUtils.formatLiveAmountInput("۱۰,۰۰۰"))
+        assertEquals(10_000L, PersianNumberUtils.parseAmountInputToLong("۱۰,۰۰۰"))
+        assertEquals(100_000L, PersianNumberUtils.parseAmountInputToLong("۱۰۰,۰۰۰ تومان"))
+    }
 }
+

@@ -133,7 +133,8 @@ data class AppSettingsEntity(
     val goldGrams: Double = 11.12,
     val dailyAutoSaveEnabled: Boolean = true,
     val hideAmounts: Boolean = false,
-    val onlyTankhahMode: Boolean = true
+    val onlyTankhahMode: Boolean = true,
+    val tankhahModeEnabled: Boolean = false
 )
 
 @Dao
@@ -221,7 +222,7 @@ interface OrosiDao {
         CommitmentEntity::class,
         AppSettingsEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class OrosiDatabase : RoomDatabase() {

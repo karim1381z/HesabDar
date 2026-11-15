@@ -332,6 +332,7 @@ fun OrosiFinanceApp(
                             bankAccounts = uiState.bankAccounts,
                             commitments = uiState.commitments,
                             transactions = uiState.transactions,
+                            isSyncingSms = uiState.isSyncingSms,
                             onToggleHideAmounts = { viewModel.toggleHideAmounts() },
                             onSetOnlyTankhahMode = { viewModel.setOnlyTankhahMode(it) },
                             onToggleAccountTankhah = { viewModel.toggleAccountTankhah(it) },
@@ -367,6 +368,8 @@ fun OrosiFinanceApp(
                         AccountsScreen(
                             bankAccounts = uiState.bankAccounts,
                             hideAmounts = uiState.settings.hideAmounts,
+                            tankhahModeEnabled = uiState.settings.tankhahModeEnabled,
+                            onSetTankhahModeEnabled = { viewModel.setTankhahModeEnabled(it) },
                             onToggleTankhah = { bankName -> viewModel.toggleAccountTankhah(bankName) },
                             onOpenAddAccountModal = { viewModel.setShowAddBankAccountModal(true) },
                             onBackToHome = { viewModel.navigateTo(OrosiScreen.HOME) }
@@ -440,6 +443,10 @@ fun OrosiFinanceApp(
             voiceState = uiState.voiceState,
             onSpeechChange = { viewModel.onVoiceSpeechChanged(it) },
             onManualAmountChange = { viewModel.onVoiceManualAmountChanged(it) },
+            onPurposeChange = { viewModel.onVoicePurposeChanged(it) },
+            onUpdateMultiItem = { idx, title, amt ->
+                viewModel.onUpdateMultiVoiceItem(idx, title, amt)
+            },
             onSimulateVoiceRecord = { viewModel.triggerVoiceSimulation(null) },
             onConfirmVoiceEntry = { viewModel.confirmVoiceEntry() },
             onDismiss = { viewModel.dismissVoiceOverlay() }
@@ -478,6 +485,7 @@ fun OrosiFinanceApp(
             onSaveSettings = { day, label, autoSalary, goldPrice, dailySafe ->
                 viewModel.savePaydayAndGoldSettings(day, label, autoSalary, goldPrice, dailySafe)
             },
+            onSetTankhahModeEnabled = { viewModel.setTankhahModeEnabled(it) },
             onImportBackup = { viewModel.importBackupJson(it) },
             onResetDefault = { viewModel.resetDatabaseToDefault() },
             onDismiss = { viewModel.setShowPaydayBackupModal(false) }
