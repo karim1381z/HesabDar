@@ -257,5 +257,35 @@ class ExampleUnitTest {
         assertEquals(10_000L, PersianNumberUtils.parseAmountInputToLong("۱۰,۰۰۰"))
         assertEquals(100_000L, PersianNumberUtils.parseAmountInputToLong("۱۰۰,۰۰۰ تومان"))
     }
+
+    @Test
+    fun testNaturalSpeechPivotRuleAAndPreserveBabatRuleB() {
+        // Rule A: Narrative intro ("رفتم بیرون و اومدم کلاً ۵۰ هزار تومان خرج کردم برای تاکسی و کرایه و بستنی و")
+        // -> discard narrative intro before "برای", keep 50,000 Tomans, strip trailing " و" -> "تاکسی و کرایه و بستنی"
+        val ruleA = PersianVoiceSlangParserEngine.parseVoiceCommand(
+            rawSpeech = "رفتم بیرون و اومدم کلاً ۵۰ هزار تومان خرج کردم برای تاکسی و کرایه و بستنی و",
+            fallbackTotalToman = null,
+            defaultBankName = "نقدی / دستی"
+        )
+        assertEquals(50_000L, ruleA.totalAmountToman)
+        assertEquals("تاکسی و کرایه و بستنی", ruleA.purposeCategory)
+
+        val ruleAMulti = PersianVoiceSlangParserEngine.parseMultiVoiceCommands(
+            rawSpeech = "رفتم بیرون و اومدم کلاً ۵۰ هزار تومان خرج کردم برای تاکسی و کرایه و بستنی و"
+        )
+        assertEquals(1, ruleAMulti.size)
+        assertEquals(50_000L, ruleAMulti[0].amountToman)
+        assertEquals("تاکسی و کرایه و بستنی", ruleAMulti[0].title)
+
+        // Rule B: Preserve "بابت" / "برای" when connecting two nouns ("انتقال پول به احمد بابت عسل")
+        val ruleB = PersianVoiceSlangParserEngine.parseVoiceCommand(
+            rawSpeech = "انتقال پول به احمد بابت عسل",
+            fallbackTotalToman = 200_000L,
+            defaultBankName = "بلو"
+        )
+        assertEquals("انتقال پول به احمد بابت عسل", ruleB.purposeCategory)
+        assertEquals(200_000L, ruleB.totalAmountToman)
+        assertEquals("بلو", ruleB.storeName)
+    }
 }
 

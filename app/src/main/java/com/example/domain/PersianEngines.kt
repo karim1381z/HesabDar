@@ -718,7 +718,7 @@ object BankSmsParserEngine {
         val bankName = bankProfile.nameFa
         val uniqueDedupKey = JibemanSmsEngine.dedupKey(senderAddress, timestampMillis, body)
 
-        val realJalali = JalaliCalendarUtils.fromTimestamp(timestampMillis)
+        val realJalali = JalaliCalendarUtils.timestampToJalali(timestampMillis)
         val normalizedBody = JibemanSmsEngine.normalizeMessage(body)
 
         val maskedCardRegex = Regex("""(?:[0-9]{4,6}[*xX#-]+([0-9]{4}))|(?:([0-9]{4})[*xX#-]+[0-9]{4,6})""")
@@ -794,7 +794,7 @@ object BankSmsParserEngine {
             isUntaggedPurchase = isUntaggedPurchase,
             isValidFinancialSms = true,
             dedupKey = uniqueDedupKey,
-            weekdayDate = realJalali.weekdayDate,
+            weekdayDate = realJalali.dateWithYear,
             jalaliYear = realJalali.year,
             timeStr = realJalali.timeStr,
             detectedTitle = detectedTitle,
@@ -835,7 +835,7 @@ object BankSmsParserEngine {
         }
         val jibemanParsed = JibemanSmsEngine.parse(rawSms)
         val bankName = detectIranianBankName(rawSms, senderAddress)
-        val realJalali = JalaliCalendarUtils.fromTimestamp(timestampMillis)
+        val realJalali = JalaliCalendarUtils.timestampToJalali(timestampMillis)
         val amountRial = jibemanParsed?.amount ?: 0L
         val amountToman = amountRial / 10L
         val balanceToman = jibemanParsed?.balance?.div(10L)
@@ -857,7 +857,7 @@ object BankSmsParserEngine {
             isUntaggedPurchase = !isDeposit,
             isValidFinancialSms = jibemanParsed != null && amountToman > 0L,
             dedupKey = dedupKey,
-            weekdayDate = realJalali.weekdayDate,
+            weekdayDate = realJalali.dateWithYear,
             jalaliYear = realJalali.year,
             timeStr = realJalali.timeStr,
             detectedTitle = if (isDeposit) "واریز به $cardLabel" else "برداشت از $cardLabel",
@@ -988,18 +988,35 @@ object PersianVoiceSlangParserEngine {
         "کارت کشیدم",
         "واریز کردم",
         "خرید کردم",
-        "خرج کردم"
+        "خرج کردم",
+        "پول دادم",
+        "حساب کردم",
+        "رفتم بیرون",
+        "بیرون رفتم"
     )
 
+    // Note: "برای", "بابت", "بابتِ", "واسه" are intentionally NOT in singleWordConversationalFillers
+    // so they are preserved when connecting two meaningful nouns (Rule B: "انتقال پول به احمد بابت عسل")
+    // and handled via pivot rule when preceded by narrative intros or at the start of a phrase (Rule A).
     private val singleWordConversationalFillers = listOf(
         "سلام",
         "علیکم",
         "درود",
         "والا",
         "ولی",
-        "برای",
-        "بابتِ",
-        "بابت",
+        "رفتم",
+        "بیرون",
+        "اومدم",
+        "آمدم",
+        "برگشتم",
+        "امروز",
+        "دیروز",
+        "دیشب",
+        "پریروز",
+        "کلاً",
+        "کلا",
+        "جمعاً",
+        "جمعا",
         "خریدم",
         "گرفتم",
         "دادم",
@@ -1011,6 +1028,27 @@ object PersianVoiceSlangParserEngine {
         "تومن",
         "میلیون",
         "میلیارد"
+    )
+
+    private val narrativeIntroTriggerWords = listOf(
+        "رفتم",
+        "بیرون",
+        "اومدم",
+        "آمدم",
+        "برگشتم",
+        "امروز",
+        "دیروز",
+        "دیشب",
+        "پریروز",
+        "کلاً",
+        "کلا",
+        "جمعاً",
+        "جمعا",
+        "خرج کردم",
+        "پول دادم",
+        "کارت کشیدم",
+        "پرداخت کردم",
+        "خرید کردم"
     )
 
     private val countingUnits = listOf(
@@ -1168,7 +1206,19 @@ object PersianVoiceSlangParserEngine {
         }
     }
 
-    fun stripGreetingsAndFillers(rawText: String): String {
+    private fun trimLeadingAndTrailingVav(input: String): String {
+        var s = input.replace(Regex("""\s+"""), " ").trim()
+        while (s.startsWith("و ")) {
+            s = s.removePrefix("و ").trim()
+        }
+        while (s.endsWith(" و")) {
+            s = s.removeSuffix(" و").trim()
+        }
+        if (s == "و") return ""
+        return s
+    }
+
+    private fun stripBasicFillersOnly(rawText: String): String {
         var result = PersianNumberUtils.normalizePersianText(rawText)
         for (phrase in multiWordConversationalFillers) {
             result = result.replace(Regex("""(?<=^|\s)$phrase(?=\s|$)"""), " ")
@@ -1176,14 +1226,92 @@ object PersianVoiceSlangParserEngine {
         for (word in singleWordConversationalFillers) {
             result = result.replace(Regex("""(?<=^|\s)$word(?=\s|$)"""), " ")
         }
-        result = result.replace(Regex("""\s+"""), " ").trim()
-        // Strip leading/trailing孤立 "و"
-        result = result.removePrefix("و ").removeSuffix(" و").trim()
-        // Strip leading "خرید " when followed by an item noun (e.g. "خرید نانوایی" -> "نانوایی", "خرید دمپایی" -> "دمپایی")
+        result = trimLeadingAndTrailingVav(result)
         if (result.startsWith("خرید ") && result.removePrefix("خرید ").trim().isNotBlank()) {
             result = result.removePrefix("خرید ").trim()
         }
-        return result
+        return trimLeadingAndTrailingVav(result)
+    }
+
+    /**
+     * Applies both Rule A and Rule B for Persian voice NLU:
+     * - Rule A (Pivot on "برای" / "بابت" / "واسه" after narrative intros or at start):
+     *   If the clause contains narrative intro markers (رفتم, بیرون, اومدم, برگشتم, کلاً, خرج کردم, ...)
+     *   before "برای" / "بابت" / "واسه" (or if nothing meaningful precedes it), discard the intro before
+     *   "برای"/"بابت"/"واسه" and return ONLY the target items after it!
+     * - Rule B (Preserve "بابت" / "برای" when connecting two meaningful phrases):
+     *   If both the left and right sides of "بابت" / "برای" / "واسه" are meaningful noun phrases
+     *   (e.g. "انتقال پول به احمد بابت عسل"), preserve the connector intact!
+     */
+    fun stripGreetingsAndFillers(rawText: String): String {
+        val normalized = PersianNumberUtils.normalizePersianText(rawText)
+        val pivotRegex = Regex("""^(.*?)(?<=^|\s)(برای|بابتِ|بابت|واسه)(?=\s|$)(.*)$""")
+        val match = pivotRegex.find(normalized)
+
+        var result = if (match != null) {
+            val leftRaw = match.groupValues[1].trim()
+            val prep = if (match.groupValues[2] == "بابتِ") "بابت" else match.groupValues[2].trim()
+            val rightRaw = match.groupValues[3].trim()
+
+            val hasNarrativeIntroOnLeft = narrativeIntroTriggerWords.any { marker ->
+                Regex("""(?<=^|\s)$marker(?=\s|$)""").containsMatchIn(leftRaw)
+            }
+            val leftClean = stripBasicFillersOnly(leftRaw)
+            val rightClean = stripBasicFillersOnly(rightRaw)
+
+            when {
+                hasNarrativeIntroOnLeft && rightClean.isNotBlank() -> rightClean
+                leftClean.isBlank() -> rightClean
+                rightClean.isBlank() -> leftClean
+                else -> "$leftClean $prep $rightClean"
+            }
+        } else {
+            stripBasicFillersOnly(normalized)
+        }
+
+        // Strip leading/trailing standalone prepositions if any remain
+        for (prep in listOf("برای", "بابتِ", "بابت", "واسه")) {
+            if (result.startsWith("$prep ")) {
+                result = result.removePrefix("$prep ").trim()
+            }
+            if (result.endsWith(" $prep")) {
+                result = result.removeSuffix(" $prep").trim()
+            }
+        }
+
+        return trimLeadingAndTrailingVav(result)
+    }
+
+    /**
+     * Pre-normalizes a sentence before multi-clause splitting:
+     * If there is a narrative intro before `برای`/`بابت`/`واسه` (like
+     * "رفتم بیرون و اومدم کلاً ۵۰ هزار تومان خرج کردم برای تاکسی و کرایه و بستنی و"),
+     * discards the narrative intro while keeping any money amount from the intro attached to the target items
+     * so `extractCandidateSubClauses` never splits on "رفتم بیرون و اومدم"!
+     */
+    private fun pivotNarrativeIntroKeepingAmount(rawText: String): String {
+        val cleaned = PersianNumberUtils.normalizePersianText(rawText.trim())
+        val pivotRegex = Regex("""^(.*?)(?<=^|\s)(?:برای|بابتِ|بابت|واسه)(?=\s|$)\s*(.+)$""")
+        val match = pivotRegex.find(cleaned) ?: return trimLeadingAndTrailingVav(cleaned)
+
+        val leftRaw = match.groupValues[1].trim()
+        val rightRaw = trimLeadingAndTrailingVav(match.groupValues[2].trim())
+        if (rightRaw.isBlank()) return trimLeadingAndTrailingVav(cleaned)
+
+        val hasNarrativeIntroOnLeft = narrativeIntroTriggerWords.any { marker ->
+            Regex("""(?<=^|\s)$marker(?=\s|$)""").containsMatchIn(leftRaw)
+        }
+        if (!hasNarrativeIntroOnLeft) {
+            return trimLeadingAndTrailingVav(cleaned)
+        }
+
+        val leftAmount = parseSpokenPersianAmountToman(leftRaw)
+        val rightAmount = parseSpokenPersianAmountToman(rightRaw)
+        return if (leftAmount > 0L && rightAmount == 0L) {
+            "${leftAmount / 1000L} هزار تومان $rightRaw"
+        } else {
+            rightRaw
+        }
     }
 
     /**
@@ -1358,14 +1486,15 @@ object PersianVoiceSlangParserEngine {
         defaultBankName: String = "نقدی / دستی",
         fallbackTotalToman: Long? = null
     ): List<ParsedVoiceExpense> {
-        val cleaned = PersianNumberUtils.normalizePersianText(rawSpeech.trim())
-        if (cleaned.isBlank()) return emptyList()
+        val rawCleaned = PersianNumberUtils.normalizePersianText(rawSpeech.trim())
+        if (rawCleaned.isBlank()) return emptyList()
 
         // If sentence has a Dong split ("که ... دنگ"), treat as single command
-        if (cleaned.contains("که") && (cleaned.contains("دنگ") || cleaned.contains("دُنگ") || cleaned.contains("سهم"))) {
-            return listOf(parseSingleVoiceClause(cleaned, fallbackTotalToman, defaultBankName))
+        if (rawCleaned.contains("که") && (rawCleaned.contains("دنگ") || rawCleaned.contains("دُنگ") || rawCleaned.contains("سهم"))) {
+            return listOf(parseSingleVoiceClause(rawCleaned, fallbackTotalToman, defaultBankName))
         }
 
+        val cleaned = pivotNarrativeIntroKeepingAmount(rawCleaned)
         val candidateParts = extractCandidateSubClauses(cleaned)
         if (candidateParts.size <= 1) {
             return listOf(parseSingleVoiceClause(cleaned, fallbackTotalToman, defaultBankName))

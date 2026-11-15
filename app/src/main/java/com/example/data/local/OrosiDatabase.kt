@@ -46,11 +46,17 @@ data class TransactionEntity(
     val jalaliMonth: Int
         get() = JalaliCalendarUtils.timestampToJalali(timestamp).month
 
+    val jalaliDay: Int
+        get() = JalaliCalendarUtils.timestampToJalali(timestamp).day
+
     val needsVoiceTag: Boolean
         get() = isUntagged
 
     val subtitle: String
-        get() = "$weekdayDate • $timeStr • $cardInfo"
+        get() {
+            val j = JalaliCalendarUtils.timestampToJalali(timestamp)
+            return "${j.dateWithYear} • ${j.timeStr} • $cardInfo"
+        }
 
     val shortBankName: String
         get() {
@@ -69,7 +75,10 @@ data class TransactionEntity(
         }
 
     val simpleSubtitle: String
-        get() = "$weekdayDate • $timeStr • $shortBankName"
+        get() {
+            val j = JalaliCalendarUtils.timestampToJalali(timestamp)
+            return "${j.dateWithYear} • ${j.timeStr} • $shortBankName"
+        }
 
     val displayTitle: String
         get() = when {
@@ -222,7 +231,7 @@ interface OrosiDao {
         CommitmentEntity::class,
         AppSettingsEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class OrosiDatabase : RoomDatabase() {
@@ -237,7 +246,7 @@ abstract class OrosiDatabase : RoomDatabase() {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     OrosiDatabase::class.java,
-                    "orosi_finance_v4_jibeman.db"
+                    "orosi_finance_v12_exact.db"
                 ).fallbackToDestructiveMigration().build()
                 INSTANCE = instance
                 instance

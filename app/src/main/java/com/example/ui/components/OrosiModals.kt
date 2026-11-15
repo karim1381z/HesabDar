@@ -312,28 +312,13 @@ fun VoiceOverlayBottomSheet(
 
     val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) {
-            startOrRestartRecognition(triggerFallbackIfUnavailable = true)
-        } else {
-            launchSystemVoicePopup(fallbackToSimIfUnavailable = false)
-        }
+    ) { _ ->
+        launchSystemVoicePopup(fallbackToSimIfUnavailable = false)
     }
 
-    // Immediately trigger SpeechRecognizer.startListening when opened
+    // Immediately and automatically launch the system Google Voice Dialog (ACTION_RECOGNIZE_SPEECH) on open
     LaunchedEffect(Unit) {
-        val hasAudioPerm = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.RECORD_AUDIO
-        ) == PackageManager.PERMISSION_GRANTED
-        if (hasAudioPerm) {
-            startOrRestartRecognition(triggerFallbackIfUnavailable = false)
-        } else {
-            try {
-                recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-            } catch (_: Exception) {
-            }
-        }
+        launchSystemVoicePopup(fallbackToSimIfUnavailable = false)
     }
 
     val infiniteTransition = rememberInfiniteTransition(label = "voiceOverlayWave")
@@ -392,7 +377,7 @@ fun VoiceOverlayBottomSheet(
                 Spacer(modifier = Modifier.height(10.dp))
             }
 
-            // 1. Glowing Turquoise Audio Wave (Tapping stops & restarts cleanly if already listening)
+            // 1. Glowing Turquoise Audio Wave (Tapping launches the system Google Voice Dialog)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -411,19 +396,7 @@ fun VoiceOverlayBottomSheet(
                         RoundedCornerShape(24.dp)
                     )
                     .clickable {
-                        val hasAudioPerm = ContextCompat.checkSelfPermission(
-                            context,
-                            Manifest.permission.RECORD_AUDIO
-                        ) == PackageManager.PERMISSION_GRANTED
-                        if (hasAudioPerm) {
-                            startOrRestartRecognition(triggerFallbackIfUnavailable = true)
-                        } else {
-                            try {
-                                recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                            } catch (_: Exception) {
-                                launchSystemVoicePopup(fallbackToSimIfUnavailable = true)
-                            }
-                        }
+                        launchSystemVoicePopup(fallbackToSimIfUnavailable = true)
                     }
                     .padding(vertical = 16.dp, horizontal = 18.dp)
                     .testTag("voice_record_button"),
@@ -462,7 +435,7 @@ fun VoiceOverlayBottomSheet(
                     }
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = if (isListening) "در حال شنیدن صدای شما... (ضربه برای شروع مجدد)" else voiceStatusHint,
+                        text = if (isListening) "در حال شنیدن صدای شما..." else voiceStatusHint,
                         style = MaterialTheme.typography.labelMedium,
                         color = NishapurTurquoiseSoft,
                         textAlign = TextAlign.Center
@@ -472,26 +445,33 @@ fun VoiceOverlayBottomSheet(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Prominent Fallback Button: "🎤 ضبط با دیالوگ صوتی سیستم" (Works 100% on Xiaomi/Samsung & during Screen Recording)
-            OutlinedButton(
+            // Prominent Button: "🎤 شروع مجدد ضبط صوتی" (Launches native system voice dialog whenever tapped)
+            Button(
                 onClick = { launchSystemVoicePopup(fallbackToSimIfUnavailable = true) },
-                shape = RoundedCornerShape(14.dp),
-                contentPadding = PaddingValues(vertical = 10.dp, horizontal = 14.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = PersianLapis,
+                    contentColor = AlabasterSilk
+                ),
+                contentPadding = PaddingValues(vertical = 12.dp, horizontal = 16.dp),
                 modifier = Modifier
                     .fillMaxWidth()
+                    .border(1.dp, NishapurTurquoiseBright, RoundedCornerShape(16.dp))
                     .testTag("system_voice_dialog_button")
             ) {
                 Icon(
                     imageVector = Icons.Default.Mic,
                     contentDescription = null,
                     tint = NishapurTurquoiseBright,
-                    modifier = Modifier.size(18.dp)
+                    modifier = Modifier.size(20.dp)
                 )
-                Spacer(modifier = Modifier.width(6.dp))
+                Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "🎤 ضبط با دیالوگ صوتی سیستم",
-                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                    color = NishapurTurquoiseSoft
+                    text = "🎤 شروع مجدد ضبط صوتی",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.ExtraBold),
+                    color = AlabasterSilk,
+                    maxLines = 1,
+                    softWrap = false
                 )
             }
 
@@ -1938,9 +1918,11 @@ fun PaydayAndBackupBottomSheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "فعالسازی حالت حساب تنخواه (تفکیک خرج روزمره از پس‌انداز)",
+                    text = "حساب تنخواه (تفکیک خرج روزمره)",
                     style = MaterialTheme.typography.titleSmall,
                     color = AlabasterSilk,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
                 Spacer(modifier = Modifier.width(8.dp))

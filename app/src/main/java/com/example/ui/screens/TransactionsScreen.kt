@@ -29,12 +29,12 @@ import androidx.compose.material.icons.outlined.ArrowUpward
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -68,6 +68,7 @@ private val jalaliMonthNames = arrayOf(
 private data class DayTransactionGroup(
     val dateSortKey: Int,
     val dateHeaderLabel: String,
+    val dayNetSumToman: Long,
     val transactions: List<TransactionEntity>
 )
 
@@ -83,11 +84,6 @@ fun TransactionsScreen(
     modifier: Modifier = Modifier
 ) {
     BackHandler(onBack = onBackToHome)
-
-    val currentRealYearMonthKey = remember {
-        JalaliCalendarUtils.timestampToJalali(System.currentTimeMillis()).yearMonthKey
-    }
-    val isNextMonthDisabled = selectedYearMonthKey >= currentRealYearMonthKey
 
     val selectedYear = selectedYearMonthKey / 100
     val selectedMonth = (selectedYearMonthKey % 100).coerceIn(1, 12)
@@ -130,9 +126,13 @@ fun TransactionsScreen(
                 )
                 val firstJalali = JalaliCalendarUtils.timestampToJalali(sortedDayTxs.first().timestampMillis)
                 val sortKey = firstJalali.year * 10000 + firstJalali.month * 100 + firstJalali.day
+                val netSum = sortedDayTxs.sumOf { tx ->
+                    if (tx.type == "INCOME") tx.totalAmountToman else -tx.totalAmountToman
+                }
                 DayTransactionGroup(
                     dateSortKey = sortKey,
                     dateHeaderLabel = dateHeaderLabel,
+                    dayNetSumToman = netSum,
                     transactions = sortedDayTxs
                 )
             }
@@ -146,8 +146,7 @@ fun TransactionsScreen(
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // 1. Month Selector Header: in RTL, the first item is on the RIGHT (points RIGHT >)
-        // and the last item is on the LEFT (points LEFT <)
+        // 1. Month Selector Header: BOTH right (>) and left (<) circular surface buttons are always enabled and clearly visible
         item {
             Row(
                 modifier = Modifier
@@ -161,19 +160,25 @@ fun TransactionsScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // RIGHT side button in RTL: points RIGHT (>)
-                IconButton(
-                    onClick = { onChangeMonth(-1) },
+                Surface(
+                    shape = CircleShape,
+                    color = OrosiSurfaceContainer,
                     modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(PersianLapis)
-                        .testTag("prev_month_button")
+                        .size(40.dp)
+                        .border(1.dp, PersianLapisLight.copy(alpha = 0.35f), CircleShape)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.ChevronRight,
-                        contentDescription = "ماه قبل",
-                        tint = AlabasterSilk
-                    )
+                    IconButton(
+                        onClick = { onChangeMonth(-1) },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .testTag("prev_month_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ChevronRight,
+                            contentDescription = "ماه قبل",
+                            tint = AlabasterSilk
+                        )
+                    }
                 }
 
                 Text(
@@ -183,22 +188,26 @@ fun TransactionsScreen(
                     modifier = Modifier.testTag("selected_month_label")
                 )
 
-                // LEFT side button in RTL: points LEFT (<)
-                IconButton(
-                    onClick = { if (!isNextMonthDisabled) onChangeMonth(1) },
-                    enabled = !isNextMonthDisabled,
+                // LEFT side button in RTL: points LEFT (<), always enabled & visible
+                Surface(
+                    shape = CircleShape,
+                    color = OrosiSurfaceContainer,
                     modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(if (isNextMonthDisabled) OrosiSurfaceContainer else PersianLapis)
-                        .alpha(if (isNextMonthDisabled) 0.38f else 1f)
-                        .testTag("next_month_button")
+                        .size(40.dp)
+                        .border(1.dp, PersianLapisLight.copy(alpha = 0.35f), CircleShape)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.ChevronLeft,
-                        contentDescription = "ماه بعد",
-                        tint = if (isNextMonthDisabled) OrosiOnSurfaceVariant else AlabasterSilk
-                    )
+                    IconButton(
+                        onClick = { onChangeMonth(1) },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .testTag("next_month_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ChevronLeft,
+                            contentDescription = "ماه بعد",
+                            tint = AlabasterSilk
+                        )
+                    }
                 }
             }
         }
@@ -317,22 +326,45 @@ fun TransactionsScreen(
             // 3. Transactions Grouped by Jalali Date Headers sorted newest day first (timestampMillis DESC)
             sortedDayGroups.forEach { dayGroup ->
                 item(key = "header_${dayGroup.dateSortKey}") {
+                    val formattedDayNet = when {
+                        hideAmounts -> "**** تومان"
+                        dayGroup.dayNetSumToman < 0L ->
+                            "-${PersianNumberUtils.formatToman(kotlin.math.abs(dayGroup.dayNetSumToman), showUnit = true)}"
+                        dayGroup.dayNetSumToman > 0L ->
+                            "+${PersianNumberUtils.formatToman(dayGroup.dayNetSumToman, showUnit = true)}"
+                        else -> "۰ تومان"
+                    }
+                    val dayNetColor = when {
+                        dayGroup.dayNetSumToman < 0L -> RubyRoseSoft
+                        dayGroup.dayNetSumToman > 0L -> NishapurTurquoiseSoft
+                        else -> OrosiOnSurfaceVariant
+                    }
+
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 6.dp, bottom = 2.dp),
+                            .padding(top = 8.dp, bottom = 2.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
                             text = dayGroup.dateHeaderLabel,
-                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.ExtraBold),
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 14.sp
+                            ),
                             color = PersianLapisLight
                         )
                         Text(
-                            text = "${PersianNumberUtils.toPersianDigits(dayGroup.transactions.size.toString())} تراکنش",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = OrosiOnSurfaceVariant
+                            text = formattedDayNet,
+                            style = MaterialTheme.typography.labelLarge.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.5.sp
+                            ),
+                            color = dayNetColor,
+                            maxLines = 1,
+                            softWrap = false,
+                            modifier = Modifier.testTag("day_net_sum_${dayGroup.dateSortKey}")
                         )
                     }
                 }

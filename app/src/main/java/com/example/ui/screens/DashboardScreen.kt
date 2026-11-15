@@ -360,74 +360,27 @@ private fun JibemanFinancialStatusHeroCard(
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp, vertical = 20.dp)
         ) {
-            // Top bar: When tankhahModeEnabled == true, show Mode Switcher Pill (Right) + Eye Icon (Left).
-            // When tankhahModeEnabled == false (Default), show calm "وضعیت مالی" label (Right) + Eye Icon (Left).
+            // Line 1 (Top Row): Title "وضعیت مالی" on the right, Eye icon (👁) on the left
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (tankhahModeEnabled) {
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(Color.Black.copy(alpha = 0.26f))
-                            .border(1.dp, PersianLapisLight.copy(alpha = 0.30f), RoundedCornerShape(50))
-                            .padding(3.dp)
-                            .testTag("hero_mode_switcher"),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        val tankhahSelected = onlyTankhahMode
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(50))
-                                .background(if (tankhahSelected) NishapurTurquoise else Color.Transparent)
-                                .clickable { onSetOnlyTankhahMode(true) }
-                                .padding(horizontal = 10.dp, vertical = 5.dp)
-                                .testTag("mode_tankhah_only_button")
-                        ) {
-                            Text(
-                                text = "حساب تنخواه",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontWeight = if (tankhahSelected) FontWeight.Bold else FontWeight.Medium
-                                ),
-                                color = if (tankhahSelected) AlabasterSilk else PersianLapisLight
-                            )
-                        }
+                Text(
+                    text = "وضعیت مالی",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 16.sp
+                    ),
+                    color = AlabasterSilk
+                )
 
-                        val nonTankhahSelected = !onlyTankhahMode
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(50))
-                                .background(if (nonTankhahSelected) NishapurTurquoise else Color.Transparent)
-                                .clickable { onSetOnlyTankhahMode(false) }
-                                .padding(horizontal = 10.dp, vertical = 5.dp)
-                                .testTag("mode_all_accounts_button")
-                        ) {
-                            Text(
-                                text = "سایر حساب‌ها (پس‌انداز)",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontWeight = if (nonTankhahSelected) FontWeight.Bold else FontWeight.Medium
-                                ),
-                                color = if (nonTankhahSelected) AlabasterSilk else PersianLapisLight
-                            )
-                        }
-                    }
-                } else {
-                    Text(
-                        text = "وضعیت مالی",
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                        color = PersianLapisLight
-                    )
-                }
-
-                // Eye icon at top-left to toggle hiding/showing amounts (****)
                 IconButton(
                     onClick = onToggleHideAmounts,
                     modifier = Modifier
                         .size(38.dp)
                         .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.12f))
+                        .background(Color.White.copy(alpha = 0.14f))
                         .testTag("toggle_hide_amounts_button")
                 ) {
                     Icon(
@@ -439,40 +392,109 @@ private fun JibemanFinancialStatusHeroCard(
                 }
             }
 
+            // Line 2 (Only if tankhahModeEnabled == true): Clean, centered 2-tab pill switcher ("حساب تنخواه" | "پس‌انداز (سایر)")
+            if (tankhahModeEnabled) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(Color.Black.copy(alpha = 0.28f))
+                            .border(1.dp, PersianLapisLight.copy(alpha = 0.32f), RoundedCornerShape(50))
+                            .padding(3.dp)
+                            .testTag("hero_mode_switcher"),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val tankhahSelected = onlyTankhahMode
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(if (tankhahSelected) NishapurTurquoise else Color.Transparent)
+                                .clickable { onSetOnlyTankhahMode(true) }
+                                .padding(horizontal = 14.dp, vertical = 6.dp)
+                                .testTag("mode_tankhah_only_button")
+                        ) {
+                            Text(
+                                text = "حساب تنخواه",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontWeight = if (tankhahSelected) FontWeight.Bold else FontWeight.Medium,
+                                    fontSize = 12.5.sp
+                                ),
+                                color = if (tankhahSelected) AlabasterSilk else PersianLapisLight,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+
+                        val nonTankhahSelected = !onlyTankhahMode
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(if (nonTankhahSelected) NishapurTurquoise else Color.Transparent)
+                                .clickable { onSetOnlyTankhahMode(false) }
+                                .padding(horizontal = 14.dp, vertical = 6.dp)
+                                .testTag("mode_all_accounts_button")
+                        ) {
+                            Text(
+                                text = "پس‌انداز (سایر)",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontWeight = if (nonTankhahSelected) FontWeight.Bold else FontWeight.Medium,
+                                    fontSize = 12.5.sp
+                                ),
+                                color = if (nonTankhahSelected) AlabasterSilk else PersianLapisLight,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Center label + huge number:
-            // Default (`tankhahModeEnabled == false`): "موجودی کل حساب‌ها: X تومان"
-            // Tankhah Mode (`tankhahModeEnabled == true`):
-            //   - "موجودی تنخواه: X تومان" or "سایر حساب‌ها (پس‌انداز): Y تومان"
+            // Line 3 (Centered Subtitle, 13.sp, muted color): "موجودی آزاد" (or "موجودی تنخواه" / "موجودی پس‌انداز")
+            // Line 4 (Big Centered Amount ONLY, 28.sp, bold, maxLines = 1): "۵,۳۴۳,۲۰۰ تومان"
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                if (tankhahModeEnabled) {
-                    Text(
-                        text = if (onlyTankhahMode) "وضعیت مالی (حساب تنخواه)" else "وضعیت مالی (سایر حساب‌ها)",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = PersianLapisLight
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                }
-                val centerTitlePrefix = when {
-                    !tankhahModeEnabled -> "موجودی کل حساب‌ها"
+                val centerSubtitle = when {
+                    !tankhahModeEnabled -> "موجودی آزاد"
                     onlyTankhahMode -> "موجودی تنخواه"
-                    else -> "سایر حساب‌ها (پس‌انداز)"
+                    else -> "موجودی پس‌انداز"
                 }
                 val centerAmountValue = when {
                     !tankhahModeEnabled -> totalAllAccountsBalance
                     onlyTankhahMode -> tankhahBalance
                     else -> nonTankhahBalance
                 }
+
                 Text(
-                    text = "$centerTitlePrefix: ${PersianNumberUtils.formatToman(centerAmountValue, showUnit = true, hideAmount = hideAmounts)}",
+                    text = centerSubtitle,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    ),
+                    color = PersianLapisLight,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = PersianNumberUtils.formatToman(
+                        centerAmountValue,
+                        showUnit = true,
+                        hideAmount = hideAmounts
+                    ),
                     style = MaterialTheme.typography.headlineMedium.copy(
-                        fontWeight = FontWeight.Black,
-                        fontSize = 22.sp,
-                        lineHeight = 30.sp
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 28.sp,
+                        lineHeight = 34.sp
                     ),
                     color = AlabasterSilk,
                     textAlign = TextAlign.Center,
@@ -516,7 +538,7 @@ private fun JibemanFinancialStatusHeroCard(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "موجودی تنخواه (خرج روزمره):",
+                                text = "موجودی تنخواه:",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = PersianLapisLight
                             )
@@ -546,7 +568,7 @@ private fun JibemanFinancialStatusHeroCard(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "سایر حساب‌ها (پس‌انداز):",
+                                text = "پس‌انداز (سایر):",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = PersianLapisLight
                             )
@@ -779,7 +801,7 @@ fun CalmTransactionCard(
                 text = rowTitle,
                 style = MaterialTheme.typography.titleMedium.copy(
                     fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp
+                    fontSize = 15.5.sp
                 ),
                 color = AlabasterSilk,
                 maxLines = 1,
@@ -788,7 +810,7 @@ fun CalmTransactionCard(
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = transaction.simpleSubtitle,
-                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.5.sp),
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                 color = OrosiOnSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -807,8 +829,8 @@ fun CalmTransactionCard(
         Text(
             text = formattedSingleLineAmount,
             style = MaterialTheme.typography.titleSmall.copy(
-                fontWeight = FontWeight.Bold,
-                fontSize = 14.sp
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 15.sp
             ),
             color = amountColor,
             maxLines = 1,

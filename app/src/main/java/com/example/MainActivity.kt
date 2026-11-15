@@ -15,6 +15,11 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -26,6 +31,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -59,10 +65,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -96,7 +105,9 @@ import com.example.ui.theme.OrosiSurface
 import com.example.ui.theme.OrosiSurfaceContainer
 import com.example.ui.theme.OrosiSurfaceLowest
 import com.example.ui.theme.PersianLapis
+import com.example.ui.theme.PersianLapisDeep
 import com.example.ui.theme.PersianLapisLight
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -122,6 +133,12 @@ fun OrosiFinanceApp(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+
+    var showSplashIntro by remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) {
+        delay(600L)
+        showSplashIntro = false
+    }
 
     var hasSmsPermission by remember {
         mutableStateOf(
@@ -515,6 +532,77 @@ fun OrosiFinanceApp(
             },
             onDismiss = { viewModel.setShowAddBankAccountModal(false) }
         )
+    }
+
+    // Sleek 600ms Animated Splash/Intro Screen on Cold Launch
+    AnimatedVisibility(
+        visible = showSplashIntro,
+        enter = fadeIn(animationSpec = tween(220)),
+        exit = fadeOut(animationSpec = tween(320)) + scaleOut(
+            targetScale = 1.06f,
+            animationSpec = tween(320)
+        )
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            PersianLapisDeep,
+                            OrosiSurface,
+                            OrosiSurfaceLowest
+                        )
+                    )
+                )
+                .clickable(enabled = true) { showSplashIntro = false }
+                .testTag("splash_intro_overlay"),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.padding(horizontal = 32.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(28.dp),
+                    color = PersianLapis.copy(alpha = 0.85f),
+                    modifier = Modifier
+                        .size(104.dp)
+                        .border(
+                            1.5.dp,
+                            NishapurTurquoiseBright.copy(alpha = 0.65f),
+                            RoundedCornerShape(28.dp)
+                        )
+                ) {
+                    Image(
+                        painter = painterResource(id = R.drawable.ic_launcher_foreground),
+                        contentDescription = "لوگوی خیال راحت",
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(10.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.height(20.dp))
+                Text(
+                    text = "خیال راحت",
+                    style = MaterialTheme.typography.headlineMedium.copy(
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    ),
+                    color = AlabasterSilk
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "مدیریت هوشمند و خودکار پیامک‌های بانکی و دخل‌وخرج",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium
+                    ),
+                    color = NishapurTurquoiseSoft
+                )
+            }
+        }
     }
 }
 

@@ -28,7 +28,7 @@ class OrosiFinanceRepository(
 ) {
 
     companion object {
-        const val PREFS_NAME = "orosi_offline_db_v11_clean"
+        const val PREFS_NAME = "orosi_offline_db_v12_exact"
         private val smsSyncMutex = Mutex()
 
         private val demoStoreNames = setOf(
@@ -111,7 +111,7 @@ class OrosiFinanceRepository(
 
     suspend fun ensureSeeded() {
         val prefs = getPrimaryPrefs()
-        if (appContext != null && prefs != null && !prefs.getBoolean("v10_clean_migrated", false)) {
+        if (appContext != null && prefs != null && !prefs.getBoolean("v12_exact_migrated", false)) {
             dao.clearAllTransactions()
             dao.clearAllBankAccounts()
             dao.getAllCommitmentsNow().filter { isDemoCommitment(it) }.forEach { demoC ->
@@ -121,7 +121,7 @@ class OrosiFinanceRepository(
                 .remove("backup_snapshot_json")
                 .remove("jibeman_dedup_keys")
                 .remove("card_balances_v4_json")
-                .putBoolean("v10_clean_migrated", true)
+                .putBoolean("v12_exact_migrated", true)
                 .apply()
         }
 
@@ -569,6 +569,7 @@ class OrosiFinanceRepository(
         }
 
         val txType = if (isDeposit) "INCOME" else "EXPENSE"
+        val realJalali = JalaliCalendarUtils.timestampToJalali(timestampMillis)
 
         dao.insertTransaction(
             TransactionEntity(
@@ -577,8 +578,8 @@ class OrosiFinanceRepository(
                 purpose = fullResult.detectedPurpose,
                 totalAmountToman = amountToman,
                 userShareToman = amountToman,
-                weekdayDate = fullResult.weekdayDate,
-                timeStr = fullResult.timeStr,
+                weekdayDate = realJalali.dateWithYear,
+                timeStr = realJalali.timeStr,
                 cardInfo = fullResult.cardLabel,
                 type = txType,
                 isUntagged = !isDeposit,
@@ -596,7 +597,7 @@ class OrosiFinanceRepository(
             val currentSettings = dao.getSettingsNow() ?: AppSettingsEntity()
             dao.saveSettings(
                 currentSettings.copy(
-                    paydayCycleLabel = "${fullResult.weekdayDate} تا ۳۰ روز بعد (تشخیص خودکار حقوق)"
+                    paydayCycleLabel = "${realJalali.dateWithYear} تا ۳۰ روز بعد (تشخیص خودکار حقوق)"
                 )
             )
         }
@@ -607,9 +608,10 @@ class OrosiFinanceRepository(
     }
 
     /**
-     * Scans the FULL SMS Inbox (up to 3000 messages ordered by DATE DESC)
-     * using `JibemanSmsEngine` so ALL of the user's banks (Blu, Sepah, Pasargad, Mellat, Wepod, etc.)
-     * are detected and their latest `مانده` (balance) is extracted.
+     * Scans the ENTIRE SMS Inbox (NO row limit, ordered by DATE DESC)
+     * using `JibemanSmsEngine` so ALL of the user's banks (Blu, Sepah, Tejarat, Pasargad, Mellat, Wepod, etc.)
+     * are detected with their exact latest `مانده` (balance), and all transaction dates are computed
+     * strictly from `Telephony.Sms.DATE` (`timestampMillis`).
      */
     suspend fun scanDeviceSmsInboxLast30Days(
         context: Context,
@@ -618,7 +620,7 @@ class OrosiFinanceRepository(
         smsSyncMutex.withLock {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             val hadRealSmsBefore = prefs.getBoolean("has_real_bank_sms", false)
-            val cleanLedgerV7Done = prefs.getBoolean("jibeman_clean_ledger_v7", false)
+            val cleanLedgerV12Done = prefs.getBoolean("jibeman_clean_ledger_v12", false)
 
             // Preserve any custom voice tags, manual cash entries, and prior user Tankhah preferences
             val existingAllTxs = dao.getAllTransactionsNow()
@@ -636,16 +638,24 @@ class OrosiFinanceRepository(
                     !isBogusOrTestTransaction(it)
             }
 
-            if (!cleanLedgerV7Done) {
+            if (!cleanLedgerV12Done) {
                 prefs.edit().remove("jibeman_dedup_keys").apply()
             }
 
             val importedKeys = prefs.getStringSet("jibeman_dedup_keys", emptySet())?.toMutableSet()
                 ?: mutableSetOf()
 
+            val existingRoomFingerprints = if (cleanLedgerV12Done) {
+                existingAllTxs
+                    .filter { it.rawSmsBody.isNotBlank() }
+                    .mapTo(mutableSetOf()) { "${it.bankName}|${it.totalAmountToman}|${it.timestamp}|${it.rawSmsBody.trim().hashCode()}" }
+            } else {
+                mutableSetOf()
+            }
+
             var importedCount = 0
             var foundAnyRealBankSms = false
-            var wipedForV7Rebuild = false
+            var wipedForV12Rebuild = false
 
             data class DiscoveredBankState(
                 val nameFa: String,
@@ -665,7 +675,6 @@ class OrosiFinanceRepository(
                     Telephony.Sms.BODY,
                     Telephony.Sms.DATE
                 )
-                // Do NOT put "LIMIT 3000" in sortOrder as Android TelephonyProvider rejects LIMIT tokens in sortOrder
                 val sortOrder = "${Telephony.Sms.DATE} DESC"
 
                 val cursor = context.contentResolver.query(
@@ -686,10 +695,9 @@ class OrosiFinanceRepository(
                     val addrIdx = c.getColumnIndex(Telephony.Sms.ADDRESS)
                     val bodyIdx = c.getColumnIndex(Telephony.Sms.BODY)
                     val dateIdx = c.getColumnIndex(Telephony.Sms.DATE)
-                    var rowsRead = 0
 
-                    while (c.moveToNext() && rowsRead < 3000) {
-                        rowsRead++
+                    // Scan ALL inbox messages without any artificial maxScan/3000 row limit
+                    while (c.moveToNext()) {
                         val senderAddress = if (addrIdx >= 0) c.getString(addrIdx).orEmpty().trim() else ""
                         if (senderAddress.isBlank()) continue
 
@@ -702,12 +710,12 @@ class OrosiFinanceRepository(
                         val bankName = bankProfile.nameFa
                         foundAnyRealBankSms = true
 
-                        if (!cleanLedgerV7Done && !wipedForV7Rebuild) {
+                        if (!cleanLedgerV12Done && !wipedForV12Rebuild) {
                             dao.clearAllTransactions()
                             if (savedManualCashTxs.isNotEmpty()) {
                                 dao.insertTransactions(savedManualCashTxs)
                             }
-                            wipedForV7Rebuild = true
+                            wipedForV12Rebuild = true
                         }
 
                         val bankState = discoveredBanks.getOrPut(bankName) {
@@ -742,8 +750,10 @@ class OrosiFinanceRepository(
 
                         // Step 5: Exact Jibeman SHA-256 deduplication key
                         val uniqueDedupKey = JibemanSmsEngine.dedupKey(senderAddress, timestampMillis, body)
+                        val roomFingerprint = "$bankName|$amountToman|$timestampMillis|${body.trim().hashCode()}"
 
-                        if (importedKeys.contains(uniqueDedupKey)) {
+                        if (importedKeys.contains(uniqueDedupKey) || existingRoomFingerprints.contains(roomFingerprint)) {
+                            importedKeys.add(uniqueDedupKey)
                             continue
                         }
 
@@ -753,6 +763,7 @@ class OrosiFinanceRepository(
                             timestampMillis = timestampMillis
                         ) ?: continue
 
+                        // Strictly compute Jalali date & time from Telephony.Sms.DATE (timestampMillis)
                         val realJalali = JalaliCalendarUtils.timestampToJalali(timestampMillis)
                         val txType = if (isDeposit) "INCOME" else "EXPENSE"
                         val prevTagged = savedCustomTagsBySmsKey["$bankName|$amountToman|$timestampMillis"]
@@ -766,7 +777,7 @@ class OrosiFinanceRepository(
                                 userShareToman = prevTagged?.userShareToman ?: amountToman,
                                 dongAmountToman = prevTagged?.dongAmountToman ?: 0L,
                                 dongFriendName = prevTagged?.dongFriendName ?: "",
-                                weekdayDate = realJalali.weekdayDate,
+                                weekdayDate = realJalali.dateWithYear,
                                 timeStr = realJalali.timeStr,
                                 cardInfo = fullResult.cardLabel,
                                 type = txType,
@@ -779,6 +790,7 @@ class OrosiFinanceRepository(
                         )
 
                         importedKeys.add(uniqueDedupKey)
+                        existingRoomFingerprints.add(roomFingerprint)
                         importedCount++
                     }
                 }
@@ -793,7 +805,7 @@ class OrosiFinanceRepository(
             if (foundAnyRealBankSms) {
                 prefs.edit()
                     .putBoolean("has_real_bank_sms", true)
-                    .putBoolean("jibeman_clean_ledger_v7", true)
+                    .putBoolean("jibeman_clean_ledger_v12", true)
                     .apply()
                 if (!hadRealSmsBefore) {
                     dao.clearAllBankAccounts()
@@ -1259,8 +1271,13 @@ class OrosiFinanceRepository(
             )
         )
 
-        // If user edited balanceAfterToman for the latest transaction of a bank, also update that bank's balance if applicable
-        if (balanceAfterToman != null && balanceAfterToman >= 0L) {
+        // If user edited balanceAfterToman for the latest SMS transaction of a bank, also update that bank's balance if applicable
+        if (
+            balanceAfterToman != null &&
+            balanceAfterToman >= 0L &&
+            originalTx.bankName != "نقدی / دستی" &&
+            originalTx.rawSmsBody.isNotBlank()
+        ) {
             val bankKey = originalTx.shortBankName
             val acc = dao.getBankAccountByName(bankKey)
             if (acc != null && originalTx.timestamp >= acc.lastUpdatedTimestamp) {

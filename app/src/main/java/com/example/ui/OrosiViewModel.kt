@@ -208,11 +208,7 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
 
     fun changeSelectedMonth(deltaMonths: Int) {
         hasUserChangedMonthManually = true
-        val currentRealYearMonthKey = JalaliCalendarUtils.fromTimestamp(System.currentTimeMillis()).yearMonthKey
         val current = _selectedYearMonthKey.value
-        if (deltaMonths > 0 && current >= currentRealYearMonthKey) {
-            return
-        }
         var year = current / 100
         var month = (current % 100) + deltaMonths
         while (month < 1) {
@@ -223,12 +219,7 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
             month -= 12
             year += 1
         }
-        val nextKey = year * 100 + month
-        _selectedYearMonthKey.value = if (deltaMonths > 0) {
-            nextKey.coerceAtMost(currentRealYearMonthKey)
-        } else {
-            nextKey
-        }
+        _selectedYearMonthKey.value = year * 100 + month
     }
 
     fun toggleHideAmounts() {

@@ -211,14 +211,15 @@ fun AccountsScreen(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "فعالسازی حالت حساب تنخواه (تفکیک خرج روزمره از پس‌انداز)",
+                        text = "حساب تنخواه (تفکیک خرج روزمره)",
                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                        color = AlabasterSilk
+                        color = AlabasterSilk,
+                        maxLines = 1
                     )
                     Spacer(modifier = Modifier.height(3.dp))
                     Text(
                         text = if (tankhahModeEnabled) {
-                            "فعال: کارت‌های خرج روزمره از سایر حساب‌ها (پس‌انداز) تفکیک شده‌اند"
+                            "فعال: کارت‌های خرج روزمره از پس‌انداز (سایر) تفکیک شده‌اند"
                         } else {
                             "غیرفعال (پیش‌فرض): مجموع کل حساب‌ها یکجا محاسبه می‌شود"
                         },
