@@ -11,6 +11,7 @@ import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Update
+import com.example.domain.JalaliCalendarUtils
 import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "transactions")
@@ -33,6 +34,21 @@ data class TransactionEntity(
     val rawSmsBody: String = "",
     val bankName: String = ""
 ) {
+    val timestampMillis: Long
+        get() = timestamp
+
+    val jalaliDate: String
+        get() = JalaliCalendarUtils.timestampToJalali(timestamp).dateWithYear
+
+    val jalaliYear: Int
+        get() = JalaliCalendarUtils.timestampToJalali(timestamp).year
+
+    val jalaliMonth: Int
+        get() = JalaliCalendarUtils.timestampToJalali(timestamp).month
+
+    val needsVoiceTag: Boolean
+        get() = isUntagged
+
     val subtitle: String
         get() = "$weekdayDate • $timeStr • $cardInfo"
 
@@ -117,7 +133,7 @@ data class AppSettingsEntity(
     val goldGrams: Double = 11.12,
     val dailyAutoSaveEnabled: Boolean = true,
     val hideAmounts: Boolean = false,
-    val onlyTankhahMode: Boolean = false
+    val onlyTankhahMode: Boolean = true
 )
 
 @Dao

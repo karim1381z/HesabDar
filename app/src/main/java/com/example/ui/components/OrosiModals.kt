@@ -520,7 +520,10 @@ fun VoiceOverlayBottomSheet(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Live Auto-Extracted Summary Card: "عنوان / بابت" and "مبلغ (تومان)"
+            val multiItems = voiceState.parsedMultiItems
+            val isMultiNewMode = targetTx == null && multiItems.size > 1
+
+            // Live Auto-Extracted Summary Card: "عنوان / بابت" and "مبلغ (تومان)" or Multi-Item Preview List
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -530,47 +533,113 @@ fun VoiceOverlayBottomSheet(
                     .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("recognized_speech_text"),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                if (isMultiNewMode) {
                     Text(
-                        text = "عنوان / بابت:",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = OrosiOnSurfaceVariant
+                        text = "${PersianNumberUtils.toPersianDigits(multiItems.size.toString())} تراکنش مجزا تشخیص داده شد:",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.ExtraBold),
+                        color = NishapurTurquoiseSoft,
+                        modifier = Modifier.testTag("recognized_speech_text")
                     )
-                    Text(
-                        text = voiceState.purposeCategory.ifBlank { "در انتظار ورود جمله..." },
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.ExtraBold),
-                        color = if (voiceState.purposeCategory.isNotBlank()) NishapurTurquoiseSoft else OrosiOnSurfaceVariant
-                    )
-                }
 
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("voice_manual_amount_input"),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "مبلغ (تومان):",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = OrosiOnSurfaceVariant
-                    )
-                    val displayAmount = if (voiceState.totalAmountToman > 0L) {
-                        PersianNumberUtils.formatToman(voiceState.totalAmountToman, showUnit = true)
-                    } else {
-                        "۰ تومان"
+                    multiItems.forEachIndexed { idx, item ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(OrosiSurfaceContainer)
+                                .border(1.dp, OrosiHairline, RoundedCornerShape(12.dp))
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                                .testTag("multi_voice_item_$idx"),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "${PersianNumberUtils.toPersianDigits((idx + 1).toString())}. ${item.title}",
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = AlabasterSilk
+                                )
+                                val subtitleParts = buildList {
+                                    add(item.category)
+                                    if (item.merchant.isNotBlank() && item.merchant != item.title) {
+                                        add(item.merchant)
+                                    }
+                                }
+                                Text(
+                                    text = subtitleParts.joinToString(" • "),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = OrosiOnSurfaceVariant
+                                )
+                            }
+                            Text(
+                                text = PersianNumberUtils.formatToman(item.amountToman, showUnit = true),
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.ExtraBold),
+                                color = SaffronGoldLight
+                            )
+                        }
                     }
-                    Text(
-                        text = displayAmount,
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.ExtraBold),
-                        color = if (voiceState.totalAmountToman > 0L) SaffronGoldLight else RubyRoseSoft
-                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("voice_manual_amount_input"),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "جمع کل مبالغ:",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = OrosiOnSurfaceVariant
+                        )
+                        Text(
+                            text = PersianNumberUtils.formatToman(voiceState.totalAmountToman, showUnit = true),
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.ExtraBold),
+                            color = NishapurTurquoiseSoft
+                        )
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("recognized_speech_text"),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "عنوان / بابت:",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = OrosiOnSurfaceVariant
+                        )
+                        Text(
+                            text = voiceState.purposeCategory.ifBlank { "در انتظار ورود جمله..." },
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.ExtraBold),
+                            color = if (voiceState.purposeCategory.isNotBlank()) NishapurTurquoiseSoft else OrosiOnSurfaceVariant
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("voice_manual_amount_input"),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "مبلغ (تومان):",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = OrosiOnSurfaceVariant
+                        )
+                        val displayAmount = if (voiceState.totalAmountToman > 0L) {
+                            PersianNumberUtils.formatToman(voiceState.totalAmountToman, showUnit = true)
+                        } else {
+                            "۰ تومان"
+                        }
+                        Text(
+                            text = displayAmount,
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.ExtraBold),
+                            color = if (voiceState.totalAmountToman > 0L) SaffronGoldLight else RubyRoseSoft
+                        )
+                    }
                 }
             }
 
@@ -592,7 +661,13 @@ fun VoiceOverlayBottomSheet(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // 3. Confirm Button: "تأیید و ثبت"
+            val confirmButtonLabel = if (isMultiNewMode) {
+                "تأیید و ثبت (${PersianNumberUtils.toPersianDigits(multiItems.size.toString())} تراکنش)"
+            } else {
+                "تأیید و ثبت"
+            }
+
+            // 3. Confirm Button: "تأیید و ثبت" or "تأیید و ثبت (۲ تراکنش)"
             Button(
                 onClick = onConfirmVoiceEntry,
                 enabled = canConfirm,
@@ -616,7 +691,7 @@ fun VoiceOverlayBottomSheet(
                 Icon(imageVector = Icons.Default.Check, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "تأیید و ثبت",
+                    text = confirmButtonLabel,
                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.ExtraBold)
                 )
             }

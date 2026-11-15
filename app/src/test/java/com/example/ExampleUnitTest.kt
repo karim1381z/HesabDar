@@ -175,4 +175,45 @@ class ExampleUnitTest {
         assertEquals(8, jmAban)
         assertEquals(23, jdAban)
     }
+
+    @Test
+    fun testMultiVoiceCommandsAndGreetingStripper() {
+        // 1. Compound sentence: "۵۰۰ هزار نانوایی و ۳۰۰ هزار شارژ ایرانسل خریدم"
+        val items1 = PersianVoiceSlangParserEngine.parseMultiVoiceCommands(
+            "۵۰۰ هزار نانوایی و ۳۰۰ هزار شارژ ایرانسل خریدم"
+        )
+        assertEquals(2, items1.size)
+        assertEquals("نانوایی", items1[0].title)
+        assertEquals(500_000L, items1[0].amountToman)
+        assertEquals("خوراکی و روزمره", items1[0].category)
+
+        assertEquals("شارژ ایرانسل", items1[1].title)
+        assertEquals(300_000L, items1[1].amountToman)
+        assertEquals("قبض و شارژ", items1[1].category)
+        assertEquals("ایرانسل", items1[1].merchant)
+
+        // 2. Compound sentence with greetings and "خرید":
+        // "سلام ۵۰۰ هزار تومان خرید نانوایی و ۳۰۰ هزار تومان خرید دمپایی"
+        val items2 = PersianVoiceSlangParserEngine.parseMultiVoiceCommands(
+            "سلام ۵۰۰ هزار تومان خرید نانوایی و ۳۰۰ هزار تومان خرید دمپایی"
+        )
+        assertEquals(2, items2.size)
+        assertEquals("نانوایی", items2[0].title)
+        assertEquals(500_000L, items2[0].amountToman)
+        assertEquals("خوراکی و روزمره", items2[0].category)
+
+        assertEquals("دمپایی", items2[1].title)
+        assertEquals(300_000L, items2[1].amountToman)
+        assertEquals("پوشاک و خرید", items2[1].category)
+
+        // 3. Tagging a single existing bank SMS row with a multi-clause sentence
+        val taggedCombined = PersianVoiceSlangParserEngine.parseVoiceCommand(
+            rawSpeech = "۵۰۰ هزار نانوایی و ۳۰۰ هزار شارژ ایرانسل خریدم",
+            fallbackTotalToman = 800_000L,
+            defaultBankName = "بلو"
+        )
+        assertEquals("نانوایی (۵۰۰,۰۰۰) + شارژ ایرانسل (۳۰۰,۰۰۰)", taggedCombined.purposeCategory)
+        assertEquals(800_000L, taggedCombined.totalAmountToman)
+        assertEquals("بلو", taggedCombined.storeName)
+    }
 }

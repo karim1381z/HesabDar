@@ -67,9 +67,11 @@ fun AccountsScreen(
 ) {
     BackHandler(onBack = onBackToHome)
 
-    val totalAccountsToman = bankAccounts.sumOf { it.balanceToman.coerceAtLeast(0L) }
     val tankhahAccountsToman = bankAccounts
         .filter { it.isTankhah }
+        .sumOf { it.balanceToman.coerceAtLeast(0L) }
+    val nonTankhahAccountsToman = bankAccounts
+        .filter { !it.isTankhah }
         .sumOf { it.balanceToman.coerceAtLeast(0L) }
 
     LazyColumn(
@@ -79,7 +81,7 @@ fun AccountsScreen(
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. Top Card showing "جمع حساب‌ها: X تومان" and "موجودی تنخواه: Y تومان"
+        // 1. Top Card showing separate "موجودی تنخواه (خرج روزمره)" and "موجودی غیرتنخواه (پس‌انداز)"
         item {
             Column(
                 modifier = Modifier
@@ -97,35 +99,10 @@ fun AccountsScreen(
                         )
                     )
                     .border(1.dp, PersianLapisLight.copy(alpha = 0.35f), RoundedCornerShape(24.dp))
-                    .padding(22.dp)
+                    .padding(20.dp)
                     .testTag("accounts_summary_card"),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "جمع حساب‌ها:",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = PersianLapisLight
-                    )
-                    Text(
-                        text = PersianNumberUtils.formatToman(
-                            totalAccountsToman,
-                            showUnit = true,
-                            hideAmount = hideAmounts
-                        ),
-                        style = MaterialTheme.typography.headlineSmall.copy(
-                            fontWeight = FontWeight.Black,
-                            fontSize = 22.sp
-                        ),
-                        color = AlabasterSilk,
-                        modifier = Modifier.testTag("total_accounts_balance_text")
-                    )
-                }
-
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -137,7 +114,7 @@ fun AccountsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "موجودی تنخواه:",
+                        text = "موجودی تنخواه (خرج روزمره):",
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                         color = NishapurTurquoiseSoft
                     )
@@ -150,6 +127,33 @@ fun AccountsScreen(
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
                         color = AlabasterSilk,
                         modifier = Modifier.testTag("tankhah_accounts_balance_text")
+                    )
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(PersianLapis.copy(alpha = 0.65f))
+                        .border(1.dp, PersianLapisLight.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "موجودی غیرتنخواه (پس‌انداز):",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                        color = PersianLapisLight
+                    )
+                    Text(
+                        text = PersianNumberUtils.formatToman(
+                            nonTankhahAccountsToman,
+                            showUnit = true,
+                            hideAmount = hideAmounts
+                        ),
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
+                        color = SaffronGoldLight,
+                        modifier = Modifier.testTag("total_accounts_balance_text")
                     )
                 }
             }

@@ -48,7 +48,8 @@ data class VoiceUiState(
     val dongAmountToman: Long = 0L,
     val dongFriendName: String = "",
     val userShareToman: Long = 0L,
-    val targetUntaggedTransaction: TransactionEntity? = null
+    val targetUntaggedTransaction: TransactionEntity? = null,
+    val parsedMultiItems: List<ParsedVoiceExpense> = emptyList()
 )
 
 data class OrosiUiState(
@@ -437,10 +438,15 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun parseAndUpdateVoiceState(speech: String, targetTx: TransactionEntity?) {
+        val defaultBank = targetTx?.shortBankName ?: "نقدی / دستی"
+        val multiItems = PersianVoiceSlangParserEngine.parseMultiVoiceCommands(
+            rawSpeech = speech,
+            defaultBankName = defaultBank
+        )
         val parsed = PersianVoiceSlangParserEngine.parseVoiceCommand(
             rawSpeech = speech,
             fallbackTotalToman = targetTx?.totalAmountToman,
-            defaultBankName = targetTx?.shortBankName ?: "نقدی / دستی"
+            defaultBankName = defaultBank
         )
         val currentManualTyped = PersianNumberUtils.toEnglishDigits(_voiceState.value.manualAmountText)
             .replace(",", "")
@@ -473,7 +479,8 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
             dongAmountToman = safeDong,
             dongFriendName = parsed.dongFriendName,
             userShareToman = effectiveUserShare,
-            targetUntaggedTransaction = targetTx
+            targetUntaggedTransaction = targetTx,
+            parsedMultiItems = if (multiItems.size > 1) multiItems else emptyList()
         )
     }
 
@@ -505,6 +512,22 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val v = _voiceState.value
             val targetTx = v.targetUntaggedTransaction
+
+            // Check if the user spoke a multi-clause sentence (e.g. "۵۰۰ هزار نانوایی و ۳۰۰ هزار شارژ ایرانسل خریدم")
+            val multiItems = PersianVoiceSlangParserEngine.parseMultiVoiceCommands(
+                rawSpeech = v.recognizedText,
+                defaultBankName = targetTx?.shortBankName ?: "نقدی / دستی"
+            )
+            if (targetTx == null && multiItems.size > 1) {
+                repository.confirmMultiVoiceExpenses(multiItems)
+                val countFa = PersianNumberUtils.toPersianDigits(multiItems.size.toString())
+                val combinedSummary = PersianVoiceSlangParserEngine.formatCombinedMultiVoiceNote(multiItems)
+                _showVoiceOverlaySheet.value = false
+                _voiceState.value = VoiceUiState()
+                showBanner("$countFa تراکنش مجزا ثبت شد: $combinedSummary ✓")
+                return@launch
+            }
+
             val typedManualAmount = PersianNumberUtils.toEnglishDigits(v.manualAmountText)
                 .replace(",", "")
                 .replace("٬", "")
@@ -546,7 +569,7 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
                 totalAmountToman = finalTotalAmount,
                 dongAmountToman = safeDong,
                 userShareToman = finalUserShare,
-                storeName = targetTx?.shortBankName ?: "نقدی / دستی",
+                storeName = targetTx?.shortBankName ?: parsedFromSpeech.merchant.ifBlank { "نقدی / دستی" },
                 cardLabel = targetTx?.cardInfo ?: "نقدی / دستی"
             )
 
@@ -587,12 +610,14 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
     fun autoSyncSmsSilently() {
         viewModelScope.launch {
             repository.scanDeviceSmsInboxLast30Days(appContext, daysBack = 3650)
+            syncInitialSelectedMonthWithTransactions()
         }
     }
 
     fun scanDeviceSmsInboxLast30Days() {
         viewModelScope.launch {
             val count = repository.scanDeviceSmsInboxLast30Days(appContext, daysBack = 3650)
+            syncInitialSelectedMonthWithTransactions()
             _showSmsSimulatorModal.value = false
             if (count > 0) {
                 val countStr = PersianNumberUtils.toPersianDigits(count.toString())
@@ -607,6 +632,7 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
     fun cleanPurgeAndRescanRealSms() {
         viewModelScope.launch {
             val count = repository.cleanPurgeAndRescanRealSms(appContext)
+            syncInitialSelectedMonthWithTransactions()
             _showSmsSimulatorModal.value = false
             val countStr = PersianNumberUtils.toPersianDigits(count.toString())
             if (count > 0) {

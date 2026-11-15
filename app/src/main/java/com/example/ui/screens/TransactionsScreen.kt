@@ -85,7 +85,7 @@ fun TransactionsScreen(
     BackHandler(onBack = onBackToHome)
 
     val currentRealYearMonthKey = remember {
-        JalaliCalendarUtils.fromTimestamp(System.currentTimeMillis()).yearMonthKey
+        JalaliCalendarUtils.timestampToJalali(System.currentTimeMillis()).yearMonthKey
     }
     val isNextMonthDisabled = selectedYearMonthKey >= currentRealYearMonthKey
 
@@ -94,49 +94,49 @@ fun TransactionsScreen(
     val monthName = jalaliMonthNames[selectedMonth - 1]
     val monthHeaderLabel = "$monthName ${PersianNumberUtils.toPersianDigits(selectedYear.toString())}"
 
-    // Strictly filter by BOTH jalaliMonth == selectedMonth AND jalaliYear == selectedYear (never fall back to all transactions!)
-    val monthTransactions = remember(transactions, selectedYear, selectedMonth) {
+    // Strictly filter by BOTH jalaliMonth == selectedMonth AND jalaliYear == selectedYear
+    // computed from timestampMillis via JalaliCalendarUtils.timestampToJalali(timestampMillis),
+    // and ALWAYS sort filteredTransactions by it.timestampMillis DESC before calling .groupBy { it.jalaliDate }!
+    val filteredTransactions = remember(transactions, selectedYear, selectedMonth) {
         transactions
             .filter { tx ->
-                tx.totalAmountToman > 0L && run {
-                    val j = JalaliCalendarUtils.fromTimestamp(tx.timestamp)
-                    j.year == selectedYear && j.month == selectedMonth
-                }
+                val jalali = JalaliCalendarUtils.timestampToJalali(tx.timestampMillis)
+                tx.totalAmountToman > 0L &&
+                    jalali.year == selectedYear &&
+                    jalali.month == selectedMonth
             }
             .sortedWith(
-                compareByDescending<TransactionEntity> { it.timestamp }
+                compareByDescending<TransactionEntity> { it.timestampMillis }
                     .thenByDescending { it.id }
             )
     }
 
-    val monthlyIncomeToman = remember(monthTransactions) {
-        monthTransactions.filter { it.type == "INCOME" }.sumOf { it.userShareToman }
+    val monthlyIncomeToman = remember(filteredTransactions) {
+        filteredTransactions.filter { it.type == "INCOME" }.sumOf { it.totalAmountToman }
     }
-    val monthlyExpenseToman = remember(monthTransactions) {
-        monthTransactions.filter { it.type == "EXPENSE" }.sumOf { it.userShareToman }
+    val monthlyExpenseToman = remember(filteredTransactions) {
+        filteredTransactions.filter { it.type == "EXPENSE" }.sumOf { it.totalAmountToman }
     }
 
-    // Group by exact Jalali day and sort date groups strictly by timestampMillis / dateSortKey DESC
-    val sortedDayGroups = remember(monthTransactions) {
-        monthTransactions
-            .groupBy { tx ->
-                val j = JalaliCalendarUtils.fromTimestamp(tx.timestamp)
-                j.year * 10000 + j.month * 100 + j.day
-            }
+    // Group strictly after sorting by timestampMillis DESC so date headers are chronological from newest to oldest
+    val sortedDayGroups = remember(filteredTransactions) {
+        filteredTransactions
+            .groupBy { it.jalaliDate }
             .entries
-            .sortedByDescending { it.key }
-            .map { (sortKey, dayTxs) ->
+            .map { (dateHeaderLabel, dayTxs) ->
                 val sortedDayTxs = dayTxs.sortedWith(
-                    compareByDescending<TransactionEntity> { it.timestamp }
+                    compareByDescending<TransactionEntity> { it.timestampMillis }
                         .thenByDescending { it.id }
                 )
-                val headerLabel = JalaliCalendarUtils.fromTimestamp(sortedDayTxs.first().timestamp).dateWithYear
+                val firstJalali = JalaliCalendarUtils.timestampToJalali(sortedDayTxs.first().timestampMillis)
+                val sortKey = firstJalali.year * 10000 + firstJalali.month * 100 + firstJalali.day
                 DayTransactionGroup(
                     dateSortKey = sortKey,
-                    dateHeaderLabel = headerLabel,
+                    dateHeaderLabel = dateHeaderLabel,
                     transactions = sortedDayTxs
                 )
             }
+            .sortedByDescending { it.dateSortKey }
     }
 
     LazyColumn(
@@ -434,7 +434,9 @@ private fun JibemanGroupedTransactionRow(
 
             Text(
                 text = if (hasCustomNote) {
-                    "بابت: ${transaction.displayTitle}"
+                    transaction.title.ifBlank { transaction.displayTitle }
+                } else if (transaction.isUntagged) {
+                    "خرید کارتی (${transaction.shortBankName})"
                 } else {
                     transaction.title
                 },
