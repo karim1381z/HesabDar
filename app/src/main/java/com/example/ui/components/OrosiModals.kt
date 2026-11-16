@@ -1918,8 +1918,8 @@ fun PaydayAndBackupBottomSheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "حساب تنخواه (تفکیک خرج روزمره)",
-                    style = MaterialTheme.typography.titleSmall,
+                    text = "تفکیک حساب تنخواه / شرکت",
+                    style = MaterialTheme.typography.titleSmall.copy(fontSize = 13.sp),
                     color = AlabasterSilk,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -1949,11 +1949,14 @@ fun PaydayAndBackupBottomSheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "تشخیص خودکار واریز حقوق از پیامک",
-                    style = MaterialTheme.typography.titleSmall,
+                    text = "تشخیص خودکار واریز حقوق",
+                    style = MaterialTheme.typography.titleSmall.copy(fontSize = 13.sp),
                     color = AlabasterSilk,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
+                Spacer(modifier = Modifier.width(8.dp))
                 Switch(
                     checked = autoDetectSalary,
                     onCheckedChange = { autoDetectSalary = it },

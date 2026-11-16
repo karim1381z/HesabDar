@@ -1,0 +1,24 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="44dp"
+    android:height="44dp"
+    android:viewportWidth="44"
+    android:viewportHeight="44">
+    <!-- White circle background -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M22,2A20,20 0,1 1,2 22A20,20 0,0 1,22 2z" />
+    <!-- Teal #00BFA5 border -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M22,3A19,19 0,1 1,3 22A19,19 0,0 1,22 3z"
+        android:strokeWidth="2.0"
+        android:strokeColor="#00BFA5" />
+    <!-- Wepod green infinity / wave loop emblem -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M14.5,17.5C11.5,17.5 9.5,19.5 9.5,22C9.5,24.5 11.5,26.5 14.5,26.5C18,26.5 20.5,22 22,22C23.5,22 26,17.5 29.5,17.5C32.5,17.5 34.5,19.5 34.5,22C34.5,24.5 32.5,26.5 29.5,26.5C26,26.5 23.5,22 22,22C20.5,22 18,17.5 14.5,17.5Z"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeColor="#00BFA5" />
+</vector>

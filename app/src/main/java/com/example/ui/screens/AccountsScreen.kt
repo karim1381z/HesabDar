@@ -36,6 +36,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.BankAccountEntity
@@ -211,15 +212,19 @@ fun AccountsScreen(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "حساب تنخواه (تفکیک خرج روزمره)",
-                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                        text = "تفکیک حساب تنخواه / شرکت",
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
+                        ),
                         color = AlabasterSilk,
-                        maxLines = 1
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Spacer(modifier = Modifier.height(3.dp))
                     Text(
                         text = if (tankhahModeEnabled) {
-                            "فعال: کارت‌های خرج روزمره از پس‌انداز (سایر) تفکیک شده‌اند"
+                            "فعال: کارت‌های تنخواه / شرکت از شخصی تفکیک شده‌اند"
                         } else {
                             "غیرفعال (پیش‌فرض): مجموع کل حساب‌ها یکجا محاسبه می‌شود"
                         },
@@ -333,20 +338,10 @@ private fun BankAccountRowCard(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.weight(1f)
             ) {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(PersianLapis)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.AccountBalance,
-                        contentDescription = account.bankName,
-                        tint = NishapurTurquoiseSoft,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
+                com.example.ui.components.BankLogoAvatar(
+                    bankName = account.bankName,
+                    size = 44.dp
+                )
                 Spacer(modifier = Modifier.width(12.dp))
                 Column {
                     Text(

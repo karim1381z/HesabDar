@@ -100,8 +100,13 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         viewModelScope.launch {
-            repository.ensureSeeded()
-            syncInitialSelectedMonthWithTransactions()
+            try {
+                repository.ensureSeeded()
+                repository.scanDeviceSmsInboxLast30Days(appContext, daysBack = 3650)
+                syncInitialSelectedMonthWithTransactions()
+            } finally {
+                _isSyncingSms.value = false
+            }
         }
     }
 
@@ -645,8 +650,12 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun autoSyncSmsSilently() {
         viewModelScope.launch {
-            repository.scanDeviceSmsInboxLast30Days(appContext, daysBack = 3650)
-            syncInitialSelectedMonthWithTransactions()
+            try {
+                repository.scanDeviceSmsInboxLast30Days(appContext, daysBack = 3650)
+                syncInitialSelectedMonthWithTransactions()
+            } finally {
+                _isSyncingSms.value = false
+            }
         }
     }
 

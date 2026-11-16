@@ -1,0 +1,29 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="44dp"
+    android:height="44dp"
+    android:viewportWidth="44"
+    android:viewportHeight="44">
+    <!-- White circle background -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M22,2A20,20 0,1 1,2 22A20,20 0,0 1,22 2z" />
+    <!-- Deep-blue #1565C0 border -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M22,3A19,19 0,1 1,3 22A19,19 0,0 1,22 3z"
+        android:strokeWidth="2.0"
+        android:strokeColor="#1565C0" />
+    <!-- Bank Tejarat deep-blue swirling calligraphy emblem -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M14,25.5C14,18 19.5,13 25.5,14.5C30.5,15.8 31.5,21.5 27.5,25.5C23.5,29.5 16.5,29.5 14,25.5Z"
+        android:strokeWidth="3.0"
+        android:strokeLineCap="round"
+        android:strokeColor="#1565C0" />
+    <path
+        android:fillColor="#1565C0"
+        android:pathData="M20.2,19.2m-2.0,0a2.0,2.0 0,1 1,4.0 0a2.0,2.0 0,1 1,-4.0 0" />
+    <path
+        android:fillColor="#1E88E5"
+        android:pathData="M25.2,19.2m-2.0,0a2.0,2.0 0,1 1,4.0 0a2.0,2.0 0,1 1,-4.0 0" />
+</vector>

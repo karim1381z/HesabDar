@@ -418,6 +418,11 @@ private fun JibemanGroupedTransactionRow(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.weight(1f)
             ) {
+                com.example.ui.components.BankLogoAvatar(
+                    bankName = transaction.shortBankName,
+                    size = 44.dp
+                )
+                Spacer(modifier = Modifier.width(10.dp))
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))

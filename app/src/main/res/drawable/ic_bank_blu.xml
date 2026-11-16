@@ -1,0 +1,48 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="44dp"
+    android:height="44dp"
+    android:viewportWidth="44"
+    android:viewportHeight="44">
+    <!-- White circle background -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M22,2A20,20 0,1 1,2 22A20,20 0,0 1,22 2z" />
+    <!-- Thin outer border -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M22,2.75A19.25,19.25 0,1 1,2.75 22A19.25,19.25 0,0 1,22 2.75z"
+        android:strokeWidth="1.5"
+        android:strokeColor="#263238" />
+    <!-- 'b' letterform in #1E88E5 -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M10.5,12.5L10.5,27.5M10.5,22.2A3.7,3.7 0,1 1,10.5 27.2"
+        android:strokeWidth="2.7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeColor="#1E88E5" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M14.2,24.5A3.6,3.6 0,1 1,14.2 17.3A3.6,3.6 0,1 1,14.2 24.5z"
+        android:strokeWidth="2.6"
+        android:strokeColor="#1E88E5" />
+    <!-- 'l' stem in #1E88E5 -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M22,16.5L22,27.5"
+        android:strokeWidth="2.8"
+        android:strokeLineCap="round"
+        android:strokeColor="#1E88E5" />
+    <!-- Characteristic Blu dot above 'l' -->
+    <path
+        android:fillColor="#1E88E5"
+        android:pathData="M22,12.2m-1.9,0a1.9,1.9 0,1 1,3.8 0a1.9,1.9 0,1 1,-3.8 0" />
+    <!-- 'u' letterform in #1E88E5 -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M26.8,18.2L26.8,24.0C26.8,26.1 28.2,27.5 30.2,27.5C32.2,27.5 33.6,26.1 33.6,24.0L33.6,18.2M33.6,24.2L33.6,27.5"
+        android:strokeWidth="2.7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeColor="#1E88E5" />
+</vector>

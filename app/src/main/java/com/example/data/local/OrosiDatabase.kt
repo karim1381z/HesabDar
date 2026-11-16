@@ -132,14 +132,14 @@ data class CommitmentEntity(
 @Entity(tableName = "app_settings")
 data class AppSettingsEntity(
     @PrimaryKey val id: Int = 1,
-    val dailySafeBudgetToman: Long = 680_000L,
-    val monthlyBalanceToman: Long = 18_450_000L,
+    val dailySafeBudgetToman: Long = 0L,
+    val monthlyBalanceToman: Long = 0L,
     val paydayStartDay: Int = 1,
-    val paydayCycleLabel: String = "۱ آبان تا ۳۰ آبان ۱۴۰۴",
+    val paydayCycleLabel: String = "۱ آبان تا ۳۰ آبان ۱۴۰۵",
     val autoDetectSalary: Boolean = true,
     val goldPrice18kToman: Long = 4_360_000L,
-    val goldReserveToman: Long = 48_500_000L,
-    val goldGrams: Double = 11.12,
+    val goldReserveToman: Long = 0L,
+    val goldGrams: Double = 0.0,
     val dailyAutoSaveEnabled: Boolean = true,
     val hideAmounts: Boolean = false,
     val onlyTankhahMode: Boolean = true,
@@ -162,6 +162,9 @@ interface OrosiDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTransactions(txs: List<TransactionEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAllTransactions(items: List<TransactionEntity>)
 
     @Update
     suspend fun updateTransaction(tx: TransactionEntity)
@@ -231,7 +234,7 @@ interface OrosiDao {
         CommitmentEntity::class,
         AppSettingsEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class OrosiDatabase : RoomDatabase() {
@@ -246,7 +249,7 @@ abstract class OrosiDatabase : RoomDatabase() {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     OrosiDatabase::class.java,
-                    "orosi_finance_v12_exact.db"
+                    "orosi_finance_v13_jibeman.db"
                 ).fallbackToDestructiveMigration().build()
                 INSTANCE = instance
                 instance

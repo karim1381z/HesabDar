@@ -164,27 +164,6 @@ fun OrosiFinanceApp(
         }
     }
 
-    val statusModalPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { result ->
-        val granted = result[Manifest.permission.READ_SMS] == true ||
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.READ_SMS
-            ) == PackageManager.PERMISSION_GRANTED
-        hasSmsPermission = granted
-        if (granted) {
-            viewModel.autoSyncSmsSilently()
-        }
-        viewModel.setShowSmsSimulator(true)
-    }
-
-    val cleanRescanPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { _ ->
-        viewModel.cleanPurgeAndRescanRealSms()
-    }
-
     val voicePermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { _ ->
@@ -290,15 +269,7 @@ fun OrosiFinanceApp(
         topBar = {
             OrosiTopHeader(
                 currentScreen = uiState.currentScreen,
-                onProfileClick = { viewModel.setShowPaydayBackupModal(true) },
-                onStatusClick = {
-                    statusModalPermissionLauncher.launch(
-                        arrayOf(
-                            Manifest.permission.RECEIVE_SMS,
-                            Manifest.permission.READ_SMS
-                        )
-                    )
-                }
+                onProfileClick = { viewModel.setShowPaydayBackupModal(true) }
             )
         },
         bottomBar = {
@@ -480,21 +451,6 @@ fun OrosiFinanceApp(
         )
     }
 
-    // Clean, Reassuring Automatic SMS Connection Status Modal
-    if (uiState.showSmsSimulatorModal) {
-        SmsSimulatorBottomSheet(
-            onCleanPurgeAndRescanRealSms = {
-                cleanRescanPermissionLauncher.launch(
-                    arrayOf(
-                        Manifest.permission.READ_SMS,
-                        Manifest.permission.RECEIVE_SMS
-                    )
-                )
-            },
-            onDismiss = { viewModel.setShowSmsSimulator(false) }
-        )
-    }
-
     if (uiState.showPaydayBackupModal) {
         PaydayAndBackupBottomSheet(
             settings = uiState.settings,
@@ -592,15 +548,6 @@ fun OrosiFinanceApp(
                     ),
                     color = AlabasterSilk
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "مدیریت هوشمند و خودکار پیامک‌های بانکی و دخل‌وخرج",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium
-                    ),
-                    color = NishapurTurquoiseSoft
-                )
             }
         }
     }
@@ -609,15 +556,14 @@ fun OrosiFinanceApp(
 @Composable
 private fun OrosiTopHeader(
     currentScreen: OrosiScreen,
-    onProfileClick: () -> Unit,
-    onStatusClick: () -> Unit
+    onProfileClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .windowInsetsPadding(WindowInsets.statusBars)
             .padding(horizontal = 20.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
+        horizontalArrangement = Arrangement.Start,
         verticalAlignment = Alignment.CenterVertically
     ) {
         // Right side (in RTL): Clean Profile Icon + Screen Title
@@ -652,36 +598,6 @@ private fun OrosiTopHeader(
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                 color = AlabasterSilk
             )
-        }
-
-        // Left side (in RTL): Clean, reassuring Automatic Bank SMS Status Pill
-        Surface(
-            onClick = onStatusClick,
-            shape = RoundedCornerShape(50),
-            color = NishapurTurquoiseDeep.copy(alpha = 0.85f),
-            modifier = Modifier
-                .border(1.dp, NishapurTurquoiseBright.copy(alpha = 0.7f), RoundedCornerShape(50))
-                .testTag("sms_simulator_button")
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.CheckCircle,
-                    contentDescription = "اتصال خودکار به پیامک همه بانک‌ها: فعال ✓",
-                    tint = NishapurTurquoiseBright,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = "اتصال خودکار بانک‌ها ✓",
-                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                    color = NishapurTurquoiseSoft,
-                    maxLines = 1,
-                    softWrap = false
-                )
-            }
         }
     }
 }

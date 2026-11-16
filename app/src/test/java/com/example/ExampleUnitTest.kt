@@ -287,5 +287,20 @@ class ExampleUnitTest {
         assertEquals(200_000L, ruleB.totalAmountToman)
         assertEquals("بلو", ruleB.storeName)
     }
+
+    @Test
+    fun testStammeredMentalMathSpeechAndPrepositionStripping() {
+        // Real-device test case from video_2 (00:48):
+        // "سلام ۵۵ هزار تومان دادم به بستنی و ۳۹ هزار تومان دادم به دو تا سه تا ۵ تومن ۵ تومن نانوایی"
+        val items = PersianVoiceSlangParserEngine.parseMultiVoiceCommands(
+            "سلام ۵۵ هزار تومان دادم به بستنی و ۳۹ هزار تومان دادم به دو تا سه تا ۵ تومن ۵ تومن نانوایی"
+        )
+        assertEquals(2, items.size)
+        assertEquals("بستنی", items[0].title)
+        assertEquals(55_000L, items[0].amountToman)
+        assertEquals("نانوایی", items[1].title)
+        assertEquals(39_000L, items[1].amountToman)
+    }
 }
+
 
