@@ -301,6 +301,27 @@ class ExampleUnitTest {
         assertEquals("نانوایی", items[1].title)
         assertEquals(39_000L, items[1].amountToman)
     }
+
+    @Test
+    fun testAsyndeticClauseSplittingAndNegationCancellationFilter() {
+        // Test case from user's video:
+        // "سلام ۳۵ تومن دادم نونوایی ۵۰ تومن دادم بقالی ۵۵ تومن میخواستم بدم نونوایی ولی ندادم"
+        val items = PersianVoiceSlangParserEngine.parseMultiVoiceCommands(
+            "سلام ۳۵ تومن دادم نونوایی ۵۰ تومن دادم بقالی ۵۵ تومن میخواستم بدم نونوایی ولی ندادم"
+        )
+        assertEquals(2, items.size)
+        assertEquals("نونوایی", items[0].title)
+        assertEquals(35_000L, items[0].amountToman)
+        assertEquals("بقالی", items[1].title)
+        assertEquals(50_000L, items[1].amountToman)
+    }
+
+    @Test
+    fun testRejectBodyTextPromoFalsePositiveBanks() {
+        // Promo SMS mentioning "گردونه ملی گلد" from a non-bank sender must NOT be guessed as "ملی ایران"
+        assertEquals("بانک", BankSmsParserEngine.detectIranianBankName("گردونه ملی گلد ۱۷,۴۳۰ ریال", "10008590"))
+    }
 }
+
 
 

@@ -33,12 +33,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalance
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
@@ -1545,16 +1547,55 @@ private fun JibemanDetailBadge(
     }
 }
 
+private data class InboxSmsPickerRow(
+    val id: Long,
+    val senderAddress: String,
+    val body: String,
+    val dateStr: String
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddBankAccountBottomSheet(
-    onAddAccount: (bankName: String, balanceToman: Long, isTankhah: Boolean, cardLast4: String) -> Unit,
+    onAddAccount: (
+        bankName: String,
+        balanceToman: Long,
+        isTankhah: Boolean,
+        cardLast4: String,
+        customSenderAddresses: List<String>
+    ) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var bankName by remember { mutableStateOf("") }
+    val context = LocalContext.current
+    var selectedTab by remember { mutableStateOf(0) } // 0 = کارت بانکی, 1 = منبع نقدی
+    var selectedBankName by remember { mutableStateOf("بلو") }
+    var bankSearchQuery by remember { mutableStateOf("") }
+    var accountCustomTitle by remember { mutableStateOf("") }
     var balanceField by remember { mutableStateOf(TextFieldValue("")) }
     var cardLast4 by remember { mutableStateOf("") }
     var isTankhah by remember { mutableStateOf(true) }
+    var attachedSenders by remember { mutableStateOf(listOf<String>()) }
+    var showSmsSenderPickerDialog by remember { mutableStateOf(false) }
+    var recentInboxMessages by remember { mutableStateOf<List<InboxSmsPickerRow>>(emptyList()) }
+
+    val defaultSendersForSelectedBank = remember(selectedBankName) {
+        com.example.domain.JibemanSmsEngine.BANK_PROFILES
+            .firstOrNull { it.nameFa == selectedBankName || it.nameFa.replace("\u200C", " ") == selectedBankName.replace("\u200C", " ") }
+            ?.senderIds
+            ?.take(3)
+            .orEmpty()
+    }
+
+    val filteredBanks = remember(bankSearchQuery) {
+        val q = bankSearchQuery.trim()
+        if (q.isEmpty()) {
+            JibemanAssetLogoCache.ALL_38_IRANIAN_BANKS
+        } else {
+            JibemanAssetLogoCache.ALL_38_IRANIAN_BANKS.filter { (fa, key) ->
+                fa.contains(q) || key.contains(q, ignoreCase = true)
+            }
+        }
+    }
 
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -1586,7 +1627,7 @@ fun AddBankAccountBottomSheet(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "افزودن منبع مالی / حساب جدید",
+                        text = "ایجاد حساب",
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                         color = AlabasterSilk
                     )
@@ -1600,34 +1641,299 @@ fun AddBankAccountBottomSheet(
                 }
             }
 
-            OutlinedTextField(
-                value = bankName,
-                onValueChange = { bankName = it },
-                label = { Text("نام بانک یا منبع مالی (مثلاً: ملت، ویپاد، کیف پول)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            // 2-Tab Selector at top: "کارت بانکی" | "منبع نقدی"
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .testTag("add_account_name_input"),
-                singleLine = true
-            )
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(OrosiSurfaceContainer)
+                    .border(1.dp, OrosiHairline, RoundedCornerShape(14.dp))
+                    .padding(4.dp)
+                    .testTag("add_account_tab_bar"),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                val tabs = listOf(0 to "کارت بانکی", 1 to "منبع نقدی")
+                tabs.forEach { (idx, title) ->
+                    val isSelected = selectedTab == idx
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (isSelected) NishapurTurquoise else Color.Transparent)
+                            .clickable { selectedTab = idx }
+                            .padding(vertical = 10.dp)
+                            .testTag("add_account_tab_$idx")
+                    ) {
+                        Text(
+                            text = title,
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium,
+                                fontSize = 13.5.sp
+                            ),
+                            color = if (isSelected) AlabasterSilk else OrosiOnSurfaceVariant,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
 
-            OutlinedTextField(
-                value = balanceField,
-                onValueChange = { balanceField = formatAmountTextFieldValue(it) },
-                label = { Text("موجودی فعلی (تومان)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                placeholder = { Text("مثلاً: ۲,۵۰۰,۰۰۰") },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("add_account_balance_input"),
-                singleLine = true
-            )
+            if (selectedTab == 0) {
+                // Tab 1: کارت بانکی
+                Text(
+                    text = "انتخاب بانک (۳۸ بانک و مؤسسه رسمی)",
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                    color = NishapurTurquoiseSoft
+                )
 
-            OutlinedTextField(
-                value = cardLast4,
-                onValueChange = { cardLast4 = PersianNumberUtils.toPersianDigits(it) },
-                label = { Text("۴ رقم آخر کارت (اختیاری)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
+                OutlinedTextField(
+                    value = bankSearchQuery,
+                    onValueChange = { bankSearchQuery = it },
+                    label = {
+                        Text(
+                            text = "جستجوی نام بانک (مثلاً: بلو، سپه، ملت، پاسارگاد...)",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("bank_search_input"),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = NishapurTurquoiseBright,
+                        unfocusedBorderColor = OrosiHairline
+                    )
+                )
+
+                // Horizontal scrollable selector of all 38 Iranian banks with official 192x192 PNG logos
+                androidx.compose.foundation.lazy.LazyRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("iranian_banks_selector_row"),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(
+                        items = filteredBanks,
+                        key = { it.first }
+                    ) { (bankFa, _) ->
+                        val isSelected = selectedBankName == bankFa
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .width(84.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(
+                                    if (isSelected) PersianLapis else OrosiSurfaceContainer
+                                )
+                                .border(
+                                    width = if (isSelected) 1.5.dp else 1.dp,
+                                    color = if (isSelected) NishapurTurquoiseBright else OrosiHairline,
+                                    shape = RoundedCornerShape(16.dp)
+                                )
+                                .clickable { selectedBankName = bankFa }
+                                .padding(vertical = 10.dp, horizontal = 6.dp)
+                                .testTag("select_bank_$bankFa")
+                        ) {
+                            BankLogoAvatar(
+                                bankName = bankFa,
+                                size = 44.dp
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = bankFa,
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium,
+                                    fontSize = 11.sp
+                                ),
+                                color = if (isSelected) AlabasterSilk else OrosiOnSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+
+                OutlinedTextField(
+                    value = accountCustomTitle,
+                    onValueChange = { accountCustomTitle = it },
+                    label = {
+                        Text(
+                            text = "نام حساب (اختیاری — مثلاً: حساب شخصی من)",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    },
+                    placeholder = { Text("بانک $selectedBankName") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("add_account_name_input")
+                )
+
+                OutlinedTextField(
+                    value = balanceField,
+                    onValueChange = { balanceField = formatAmountTextFieldValue(it) },
+                    label = {
+                        Text(
+                            text = "مانده فعلی (تومان)",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    },
+                    placeholder = { Text("مثلاً: ۴,۳۴۲,۱۳۹") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("add_account_balance_input")
+                )
+
+                // Jibeman-style SMS sender section: "سرشماره‌های پیامکی" + "+ افزودن سرشماره از پیامک‌ها"
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(OrosiSurfaceContainer)
+                        .border(1.dp, OrosiHairline, RoundedCornerShape(16.dp))
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "سرشماره‌های پیامکی ($selectedBankName)",
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            ),
+                            color = AlabasterSilk,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        val allDisplayedSenders = (defaultSendersForSelectedBank + attachedSenders).distinct()
+                        if (allDisplayedSenders.isNotEmpty()) {
+                            Text(
+                                text = allDisplayedSenders.take(2).joinToString(" ، "),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = NishapurTurquoiseSoft,
+                                maxLines = 1
+                            )
+                        }
+                    }
+
+                    if (attachedSenders.isNotEmpty()) {
+                        Text(
+                            text = "سرشماره‌های انتخاب‌شده: ${attachedSenders.joinToString(" ، ")}",
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                            color = SaffronGoldLight
+                        )
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            val list = mutableListOf<InboxSmsPickerRow>()
+                            try {
+                                val cursor = context.contentResolver.query(
+                                    android.provider.Telephony.Sms.Inbox.CONTENT_URI,
+                                    arrayOf(
+                                        android.provider.Telephony.Sms._ID,
+                                        android.provider.Telephony.Sms.ADDRESS,
+                                        android.provider.Telephony.Sms.BODY,
+                                        android.provider.Telephony.Sms.DATE
+                                    ),
+                                    null,
+                                    null,
+                                    "${android.provider.Telephony.Sms.DATE} DESC"
+                                )
+                                cursor?.use { c ->
+                                    val idIdx = c.getColumnIndex(android.provider.Telephony.Sms._ID)
+                                    val addrIdx = c.getColumnIndex(android.provider.Telephony.Sms.ADDRESS)
+                                    val bodyIdx = c.getColumnIndex(android.provider.Telephony.Sms.BODY)
+                                    val dateIdx = c.getColumnIndex(android.provider.Telephony.Sms.DATE)
+                                    var count = 0
+                                    while (c.moveToNext() && count < 45) {
+                                        val addr = if (addrIdx >= 0) c.getString(addrIdx).orEmpty().trim() else ""
+                                        val body = if (bodyIdx >= 0) c.getString(bodyIdx).orEmpty().trim() else ""
+                                        val ts = if (dateIdx >= 0) c.getLong(dateIdx) else System.currentTimeMillis()
+                                        if (addr.isNotBlank() && body.isNotBlank()) {
+                                            val j = com.example.domain.JalaliCalendarUtils.timestampToJalali(ts)
+                                            list.add(
+                                                InboxSmsPickerRow(
+                                                    id = if (idIdx >= 0) c.getLong(idIdx) else count.toLong(),
+                                                    senderAddress = addr,
+                                                    body = body,
+                                                    dateStr = "${j.dateWithYear} • ${j.timeStr}"
+                                                )
+                                            )
+                                            count++
+                                        }
+                                    }
+                                }
+                            } catch (_: Exception) {
+                            }
+                            recentInboxMessages = list
+                            showSmsSenderPickerDialog = true
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("add_sender_from_sms_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = null,
+                            tint = NishapurTurquoiseBright,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "+ افزودن سرشماره از پیامک‌ها",
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                            color = NishapurTurquoiseSoft,
+                            maxLines = 1
+                        )
+                    }
+                }
+            } else {
+                // Tab 2: منبع نقدی
+                OutlinedTextField(
+                    value = accountCustomTitle,
+                    onValueChange = { accountCustomTitle = it },
+                    label = {
+                        Text(
+                            text = "نام حساب (مثلاً: کیف پول نقدی، گاوصندوق)",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    },
+                    placeholder = { Text("کیف پول نقدی") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("add_cash_account_name_input")
+                )
+
+                OutlinedTextField(
+                    value = balanceField,
+                    onValueChange = { balanceField = formatAmountTextFieldValue(it) },
+                    label = {
+                        Text(
+                            text = "مانده فعلی (تومان)",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    },
+                    placeholder = { Text("مثلاً: ۲,۵۰۰,۰۰۰") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("add_cash_account_balance_input")
+                )
+            }
 
             Row(
                 modifier = Modifier
@@ -1639,10 +1945,15 @@ fun AddBankAccountBottomSheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "حساب تنخواه (خرج روزمره)",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = AlabasterSilk
+                    text = "حساب تنخواه / شرکت",
+                    style = MaterialTheme.typography.titleSmall.copy(fontSize = 13.sp),
+                    color = AlabasterSilk,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
                 )
+                Spacer(modifier = Modifier.width(8.dp))
                 Switch(
                     checked = isTankhah,
                     onCheckedChange = { isTankhah = it },
@@ -1655,9 +1966,13 @@ fun AddBankAccountBottomSheet(
 
             Button(
                 onClick = {
-                    val cleanBank = bankName.trim().ifEmpty { "حساب جدید" }
+                    val finalBankName = if (selectedTab == 0) {
+                        selectedBankName.ifBlank { accountCustomTitle.trim().ifEmpty { "بلو" } }
+                    } else {
+                        accountCustomTitle.trim().ifEmpty { "کیف پول نقدی" }
+                    }
                     val parsedBalance = PersianNumberUtils.parseAmountInputToLong(balanceField.text) ?: 0L
-                    onAddAccount(cleanBank, parsedBalance, isTankhah, cardLast4)
+                    onAddAccount(finalBankName, parsedBalance, isTankhah, cardLast4, attachedSenders)
                 },
                 shape = RoundedCornerShape(16.dp),
                 colors = ButtonDefaults.buttonColors(
@@ -1673,11 +1988,108 @@ fun AddBankAccountBottomSheet(
                 Icon(imageVector = Icons.Default.Check, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "ذخیره منبع مالی",
+                    text = "ذخیره حساب",
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 )
             }
         }
+    }
+
+    if (showSmsSenderPickerDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showSmsSenderPickerDialog = false },
+            containerColor = OrosiSurfaceLow,
+            titleContentColor = AlabasterSilk,
+            textContentColor = AlabasterSilk,
+            title = {
+                Text(
+                    text = "انتخاب سرشماره از پیامک‌های اخیر",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                )
+            },
+            text = {
+                if (recentInboxMessages.isEmpty()) {
+                    Text(
+                        text = "پیامکی در صندوق ورودی یافت نشد یا دسترسی پیامک هنوز تأیید نشده است.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = OrosiOnSurfaceVariant
+                    )
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(360.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        recentInboxMessages.forEach { smsItem ->
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(OrosiSurfaceContainer)
+                                    .border(1.dp, OrosiHairline, RoundedCornerShape(14.dp))
+                                    .padding(12.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "سرشماره: ${smsItem.senderAddress}",
+                                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                            color = NishapurTurquoiseSoft,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = smsItem.dateStr,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = OrosiOnSurfaceVariant,
+                                            maxLines = 1
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(NishapurTurquoise)
+                                            .clickable {
+                                                if (smsItem.senderAddress !in attachedSenders) {
+                                                    attachedSenders = attachedSenders + smsItem.senderAddress
+                                                }
+                                                showSmsSenderPickerDialog = false
+                                            }
+                                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                                    ) {
+                                        Text(
+                                            text = "انتخاب",
+                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                            color = AlabasterSilk
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = smsItem.body.replace("\n", " "),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = AlabasterSilk,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                OutlinedButton(onClick = { showSmsSenderPickerDialog = false }) {
+                    Text("بستن", color = AlabasterSilk)
+                }
+            }
+        )
     }
 }
 
@@ -1918,10 +2330,11 @@ fun PaydayAndBackupBottomSheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "تفکیک حساب تنخواه / شرکت",
+                    text = "تفکیک حساب تنخواه",
                     style = MaterialTheme.typography.titleSmall.copy(fontSize = 13.sp),
                     color = AlabasterSilk,
                     maxLines = 1,
+                    softWrap = false,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
@@ -1949,10 +2362,11 @@ fun PaydayAndBackupBottomSheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "تشخیص خودکار واریز حقوق",
+                    text = "تشخیص خودکار حقوق",
                     style = MaterialTheme.typography.titleSmall.copy(fontSize = 13.sp),
                     color = AlabasterSilk,
                     maxLines = 1,
+                    softWrap = false,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )

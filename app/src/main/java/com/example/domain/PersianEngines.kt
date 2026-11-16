@@ -405,14 +405,42 @@ object JibemanSmsEngine : BankSmsParser {
             (a.endsWith(b) || b.endsWith(a))
     }
 
+    private val customSenderToProfile = java.util.concurrent.ConcurrentHashMap<String, BankProfile>()
+
+    fun registerCustomSenderForBank(senderAddress: String, bankNameFa: String) {
+        val cleanSender = senderAddress.trim()
+        if (cleanSender.isEmpty()) return
+        val profile = BANK_PROFILES.firstOrNull {
+            it.nameFa == bankNameFa ||
+                it.nameFa.replace("\u200C", " ") == bankNameFa.replace("\u200C", " ") ||
+                it.nameFa.contains(bankNameFa) ||
+                bankNameFa.contains(it.nameFa)
+        } ?: BankProfile(
+            nameFa = bankNameFa,
+            nameEn = bankNameFa,
+            icon = "ic_bank_blu",
+            senderIds = listOf(cleanSender)
+        )
+        customSenderToProfile[cleanSender] = profile
+        customSenderToProfile[cleanSender.lowercase(Locale.ROOT)] = profile
+        val norm = normalizeSender(cleanSender)
+        if (norm.isNotEmpty()) {
+            customSenderToProfile[norm] = profile
+        }
+    }
+
     fun findByNumber(sender: String): BankProfile? =
-        numberToProfile[sender] ?: lowercaseNumberToProfile[sender.trim().lowercase(Locale.ROOT)]
+        customSenderToProfile[sender]
+            ?: customSenderToProfile[sender.trim().lowercase(Locale.ROOT)]
+            ?: numberToProfile[sender]
+            ?: lowercaseNumberToProfile[sender.trim().lowercase(Locale.ROOT)]
 
     fun resolveBank(sender: String): BankProfile? {
         findByNumber(sender)?.let { return it }
         if (hasUssdMark(sender)) return null
         val normalized = normalizeSender(sender)
         if (normalized.isEmpty()) return null
+        customSenderToProfile[normalized]?.let { return it }
         val numeric = normalized.all { it.isDigit() }
         for (profile in BANK_PROFILES) {
             for (candidateRaw in profile.senderIds) {
@@ -804,25 +832,16 @@ object BankSmsParserEngine {
         )
     }
 
+    /**
+     * Identifies banks ONLY via `JibemanSmsEngine.resolveBank(senderAddress)` (plus custom sender numbers
+     * explicitly linked by the user). NEVER guesses bank names from SMS body text so promo SMS like
+     * "گردونه ملی گلد" are 100% rejected.
+     */
     fun detectIranianBankName(rawSms: String, senderAddress: String = ""): String {
-        JibemanSmsEngine.resolveBank(senderAddress)?.let { return it.nameFa }
-        val normalized = JibemanSmsEngine.normalizeMessage(rawSms)
-        for (profile in JibemanSmsEngine.BANK_PROFILES) {
-            if (normalized.contains(profile.nameFa) ||
-                normalized.contains(profile.nameFa.replace("\u200C", " "))
-            ) {
-                return profile.nameFa
-            }
+        if (senderAddress.isNotBlank()) {
+            JibemanSmsEngine.resolveBank(senderAddress)?.let { return it.nameFa }
         }
-        return when {
-            normalized.contains("بلو") -> "بلو"
-            normalized.contains("صادرات") -> "صادرات ایران"
-            normalized.contains("ملی") -> "ملی ایران"
-            normalized.contains("رسالت") -> "قرض‌الحسنه رسالت"
-            normalized.contains("مهر ایران") -> "قرض‌الحسنه مهر ایران"
-            normalized.contains("رفاه") -> "رفاه کارگران"
-            else -> "بانک"
-        }
+        return "بانک"
     }
 
     fun parseBankSms(
@@ -1474,17 +1493,112 @@ object PersianVoiceSlangParserEngine {
         }
     }
 
-    private fun extractCandidateSubClauses(cleaned: String): List<String> {
-        val byVav = cleaned.split(Regex("""\s+و\s+""")).map { it.trim() }.filter { it.isNotBlank() }
-        if (byVav.size >= 2) {
-            val expanded = mutableListOf<String>()
-            for (part in byVav) {
-                val verbSplit = splitOnMidSentenceVerb(part)
-                expanded.addAll(verbSplit)
+    private val negationAndCancellationMarkers = listOf(
+        "ندادم",
+        "نخریدم",
+        "نگرفتم",
+        "نکردم",
+        "نزدم",
+        "نشد",
+        "کنسل",
+        "کنسلش",
+        "لغو",
+        "پشیمون",
+        "پشیمان",
+        "منصرف",
+        "نخواستم",
+        "نمیخوام",
+        "نمی‌خوام",
+        "نمیخواستم",
+        "نمی‌خواستم"
+    )
+
+    /**
+     * Rule B (Negation & Cancellation Filter):
+     * Returns true if the clause contains a negation or cancellation marker such as
+     * `ندادم`, `نخریدم`, `نگرفتم`, `نکردم`, `نزدم`, `نشد`, `کنسل`, `لغو`, `پشیمون`, `منصرف`, `نخواستم`,
+     * or `میخواستم / می‌خواستم ... ولی / اما`.
+     */
+    fun isNegatedOrCancelledClause(clause: String): Boolean {
+        val norm = PersianNumberUtils.normalizePersianText(clause.trim())
+        if (norm.isBlank()) return false
+        for (marker in negationAndCancellationMarkers) {
+            if (Regex("""(?<=^|\s)$marker(?=\s|$)""").containsMatchIn(norm)) {
+                return true
             }
-            return expanded
         }
-        return splitOnMidSentenceVerb(cleaned)
+        val hasWantedTo = Regex("""(?<=^|\s)(?:میخواستم|می‌خواستم|میخواهم|میخوام)(?=\s|$)""").containsMatchIn(norm)
+        val hasBut = Regex("""(?<=^|\s)(?:ولی|اما)(?=\s|$)""").containsMatchIn(norm)
+        return hasWantedTo && hasBut
+    }
+
+    /**
+     * Rule A (Asyndetic Clause Splitting):
+     * Splits consecutive clauses even when the user does NOT say " و " between them, whenever a new
+     * `<number> + <currency: تومن/تومان/هزار/میلیون>` pattern begins after a noun or payment verb
+     * (`دادم`, `خریدم`, `گرفتم`, `زدم`, `کردم`).
+     */
+    private fun splitAsyndeticAmountClauses(clause: String): List<String> {
+        val trimmed = clause.trim()
+        if (trimmed.isBlank()) return emptyList()
+
+        val numberWordsPattern = numberWordTokens.keys.sortedByDescending { it.length }.joinToString("|")
+        val amountStartRegex = Regex(
+            """(?<=^|\s)(?:[۰-۹0-9][۰-۹0-9,٬،]*(?:\.[۰-۹0-9]+)?|(?:$numberWordsPattern)(?:\s+و\s+(?:$numberWordsPattern))*)\s+(?:میلیارد|میلیون|ملیون|هزار\s*تومان|هزار\s*تومن|هزار|تومان|تومن|ریال)(?=\s|$)"""
+        )
+
+        val matches = amountStartRegex.findAll(trimmed).toList()
+        if (matches.size <= 1) return listOf(trimmed)
+
+        val result = mutableListOf<String>()
+        var currentStart = 0
+
+        for (i in 1 until matches.size) {
+            val match = matches[i]
+            val candidateSplitIdx = match.range.first
+            val precedingSegment = trimmed.substring(currentStart, candidateSplitIdx).trim()
+
+            // Do not split if preceding segment is part of a "که ... دنگ" phrase
+            if (precedingSegment.endsWith("که") || precedingSegment.endsWith("و")) {
+                continue
+            }
+
+            val precedingParsed = parseSingleVoiceClause(precedingSegment, null, "نقدی / دستی")
+            val hasExplicitVerb = Regex("""(?<=^|\s)(?:دادم|خریدم|گرفتم|زدم|کردم|بدم)(?=\s|$)""")
+                .containsMatchIn(precedingSegment)
+
+            if (precedingParsed.totalAmountToman > 0L &&
+                (precedingParsed.purposeCategory.isNotBlank() || hasExplicitVerb)
+            ) {
+                result.add(precedingSegment)
+                currentStart = candidateSplitIdx
+            }
+        }
+
+        val tail = trimmed.substring(currentStart).trim()
+        if (tail.isNotBlank()) {
+            result.add(tail)
+        }
+        return result
+    }
+
+    private fun extractCandidateSubClauses(cleaned: String): List<String> {
+        val normalized = stripMentalMathChains(cleaned)
+        val byConjOrComma = normalized
+            .split(Regex("""(?:\s+و\s+|،)"""))
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+
+        val afterAsyndetic = mutableListOf<String>()
+        for (part in byConjOrComma) {
+            afterAsyndetic.addAll(splitAsyndeticAmountClauses(part))
+        }
+
+        val expanded = mutableListOf<String>()
+        for (part in afterAsyndetic) {
+            expanded.addAll(splitOnMidSentenceVerb(part))
+        }
+        return expanded
     }
 
     private fun splitOnMidSentenceVerb(clause: String): List<String> {
@@ -1492,6 +1606,9 @@ object PersianVoiceSlangParserEngine {
         val match = midVerbRegex.find(clause.trim()) ?: return listOf(clause.trim())
         val left = match.groupValues[1].trim()
         val right = match.groupValues[2].trim()
+        if (isNegatedOrCancelledClause(left) || isNegatedOrCancelledClause(right)) {
+            return listOf(clause.trim())
+        }
         val rightParsed = parseSingleVoiceClause(right, null, "نقدی / دستی")
         val leftParsed = parseSingleVoiceClause(left, null, "نقدی / دستی")
         return if (leftParsed.purposeCategory.isNotBlank() && rightParsed.purposeCategory.isNotBlank()) {
@@ -1510,13 +1627,20 @@ object PersianVoiceSlangParserEngine {
         if (rawCleaned.isBlank()) return emptyList()
 
         if (rawCleaned.contains("که") && (rawCleaned.contains("دنگ") || rawCleaned.contains("دُنگ") || rawCleaned.contains("سهم"))) {
+            if (isNegatedOrCancelledClause(rawCleaned)) return emptyList()
             return listOf(parseSingleVoiceClause(rawCleaned, fallbackTotalToman, defaultBankName))
         }
 
         val cleaned = pivotNarrativeIntroKeepingAmount(rawCleaned)
-        val candidateParts = extractCandidateSubClauses(cleaned)
-        if (candidateParts.size <= 1) {
-            return listOf(parseSingleVoiceClause(cleaned, fallbackTotalToman, defaultBankName))
+        val rawCandidateParts = extractCandidateSubClauses(cleaned)
+        // Rule B: Drop any negated or cancelled clause (e.g. "۵۵ تومن میخواستم بدم نونوایی ولی ندادم")
+        val candidateParts = rawCandidateParts.filterNot { isNegatedOrCancelledClause(it) }
+
+        if (candidateParts.isEmpty()) {
+            return emptyList()
+        }
+        if (candidateParts.size == 1) {
+            return listOf(parseSingleVoiceClause(candidateParts.first(), fallbackTotalToman, defaultBankName))
         }
 
         // Case A: Tagging an existing bank transaction with known total (e.g. 100,000 Tomans)
@@ -1577,7 +1701,8 @@ object PersianVoiceSlangParserEngine {
             }
         }
 
-        return listOf(parseSingleVoiceClause(cleaned, fallbackTotalToman, defaultBankName))
+        val combinedKept = candidateParts.joinToString(" و ")
+        return listOf(parseSingleVoiceClause(combinedKept, fallbackTotalToman, defaultBankName))
     }
 
     fun parseVoiceCommand(
@@ -1623,7 +1748,36 @@ object PersianVoiceSlangParserEngine {
             }
         }
 
+        if (multiItems.size == 1) {
+            return multiItems.first()
+        }
+
+        if (isNegatedOrCancelledClause(cleaned)) {
+            return ParsedVoiceExpense(
+                recognizedSpeech = cleaned,
+                totalAmountToman = 0L,
+                userShareToman = 0L,
+                dongAmountToman = 0L,
+                dongFriendName = "",
+                storeName = defaultBankName,
+                purposeCategory = "",
+                cardLabel = "نقدی / دستی"
+            )
+        }
+
         return parseSingleVoiceClause(cleaned, fallbackTotalToman, defaultBankName)
+    }
+
+    private fun detectSpokenCardBankInVoice(speech: String): String {
+        val cardBankRegex = Regex("""کارت\s+(بلو|ملت|ملی|سپه|پاسارگاد|سامان|صادرات|تجارت|رسالت|ویپاد|مسکن|رفاه|پارسیان|کشاورزی|گردشگری|شهر|سینا|آینده|دی|کارآفرین)""")
+        val match = cardBankRegex.find(speech) ?: return "بانک"
+        return when (val raw = match.groupValues[1]) {
+            "ملی" -> "ملی ایران"
+            "صادرات" -> "صادرات ایران"
+            "رسالت" -> "قرض‌الحسنه رسالت"
+            "رفاه" -> "رفاه کارگران"
+            else -> raw
+        }
     }
 
     private fun parseSingleVoiceClause(
@@ -1680,7 +1834,7 @@ object PersianVoiceSlangParserEngine {
         val effectiveBankName = if (isTaggingExistingSms) {
             defaultBankName.ifBlank { "بلو" }
         } else {
-            val spokenBank = BankSmsParserEngine.detectIranianBankName(speechBeforeDong)
+            val spokenBank = detectSpokenCardBankInVoice(speechBeforeDong)
             if (spokenBank != "بانک") spokenBank else defaultBankName.takeIf { it.isNotBlank() && it != "بانک" } ?: "نقدی / دستی"
         }
         val cardLabel = if (effectiveBankName == "نقدی / دستی") "نقدی / دستی" else "کارت $effectiveBankName"

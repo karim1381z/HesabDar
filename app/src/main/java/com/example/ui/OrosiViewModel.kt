@@ -265,10 +265,17 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
         bankName: String,
         balanceToman: Long,
         isTankhah: Boolean,
-        cardLast4: String = ""
+        cardLast4: String = "",
+        customSenderAddresses: List<String> = emptyList()
     ) {
         viewModelScope.launch {
-            repository.addOrUpdateBankAccount(bankName, balanceToman, isTankhah, cardLast4)
+            repository.addOrUpdateBankAccount(
+                bankName = bankName,
+                balanceToman = balanceToman,
+                isTankhah = isTankhah,
+                cardLast4 = cardLast4,
+                customSenderAddresses = customSenderAddresses
+            )
             _showAddBankAccountModal.value = false
             showBanner("منبع مالی «$bankName» با موجودی ${PersianNumberUtils.formatToman(balanceToman, true)} ذخیره شد.")
         }

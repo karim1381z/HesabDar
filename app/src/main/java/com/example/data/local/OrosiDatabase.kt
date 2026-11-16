@@ -234,7 +234,7 @@ interface OrosiDao {
         CommitmentEntity::class,
         AppSettingsEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class OrosiDatabase : RoomDatabase() {
@@ -249,7 +249,7 @@ abstract class OrosiDatabase : RoomDatabase() {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     OrosiDatabase::class.java,
-                    "orosi_finance_v13_jibeman.db"
+                    "orosi_finance_v15_jibeman.db"
                 ).fallbackToDestructiveMigration().build()
                 INSTANCE = instance
                 instance

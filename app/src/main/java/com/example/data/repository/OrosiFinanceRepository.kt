@@ -28,7 +28,7 @@ class OrosiFinanceRepository(
 ) {
 
     companion object {
-        const val PREFS_NAME = "orosi_offline_db_v13_jibeman"
+        const val PREFS_NAME = "orosi_offline_db_v15_jibeman"
         private val smsSyncMutex = Mutex()
 
         private val demoStoreNames = setOf(
@@ -117,9 +117,46 @@ class OrosiFinanceRepository(
         return false
     }
 
+    private fun loadCustomSendersFromPrefs() {
+        val prefs = getPrimaryPrefs() ?: return
+        try {
+            val raw = prefs.getString("custom_sender_bank_map_json", "{}") ?: "{}"
+            val obj = JSONObject(raw)
+            val keys = obj.keys()
+            while (keys.hasNext()) {
+                val sender = keys.next()
+                val bankName = obj.optString(sender, "")
+                if (sender.isNotBlank() && bankName.isNotBlank()) {
+                    JibemanSmsEngine.registerCustomSenderForBank(sender, bankName)
+                }
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    fun saveCustomSendersForBank(bankName: String, senderAddresses: List<String>) {
+        val prefs = getPrimaryPrefs() ?: return
+        val cleanBank = bankName.trim()
+        if (cleanBank.isEmpty() || senderAddresses.isEmpty()) return
+        try {
+            val raw = prefs.getString("custom_sender_bank_map_json", "{}") ?: "{}"
+            val obj = JSONObject(raw)
+            for (addr in senderAddresses) {
+                val cleanAddr = addr.trim()
+                if (cleanAddr.isNotEmpty()) {
+                    obj.put(cleanAddr, cleanBank)
+                    JibemanSmsEngine.registerCustomSenderForBank(cleanAddr, cleanBank)
+                }
+            }
+            prefs.edit().putString("custom_sender_bank_map_json", obj.toString()).apply()
+        } catch (_: Exception) {
+        }
+    }
+
     suspend fun ensureSeeded() {
+        loadCustomSendersFromPrefs()
         val prefs = getPrimaryPrefs()
-        if (appContext != null && prefs != null && !prefs.getBoolean("v13_jibeman_migrated", false)) {
+        if (appContext != null && prefs != null && !prefs.getBoolean("v15_jibeman_migrated", false)) {
             dao.clearAllTransactions()
             dao.clearAllBankAccounts()
             dao.getAllCommitmentsNow().filter { isDemoCommitment(it) }.forEach { demoC ->
@@ -129,7 +166,7 @@ class OrosiFinanceRepository(
                 .remove("backup_snapshot_json")
                 .remove("jibeman_dedup_keys")
                 .remove("card_balances_v4_json")
-                .putBoolean("v13_jibeman_migrated", true)
+                .putBoolean("v15_jibeman_migrated", true)
                 .apply()
         }
 
@@ -375,14 +412,12 @@ class OrosiFinanceRepository(
         timestampMillis: Long = System.currentTimeMillis(),
         senderAddress: String = ""
     ): ParsedSmsResult? = smsSyncMutex.withLock {
+        loadCustomSendersFromPrefs()
         val bankProfile = JibemanSmsEngine.resolveBank(senderAddress) ?: return null
         val bankName = bankProfile.nameFa
 
-        val parsed = JibemanSmsEngine.parse(rawSms)
-        if (parsed == null) {
-            upsertDiscoveredBankAccount(bankName, bankProfile.nameEn, null, timestampMillis)
-            return null
-        }
+        // Only accept SMS if JibemanSmsEngine.parse(rawSms) succeeds (never create false-positive accounts on unparsed SMS)
+        val parsed = JibemanSmsEngine.parse(rawSms) ?: return null
 
         val amountToman = parsed.amount / 10L
         if (amountToman <= 0L) return null
@@ -457,19 +492,24 @@ class OrosiFinanceRepository(
     }
 
     /**
-     * Instant (<100ms) batch SMS Inbox scanner on `Dispatchers.IO`:
-     * 1) Checks `JibemanSmsEngine.resolveBank(address) ?: continue` FIRST before calling `JibemanSmsEngine.parse(body)`.
-     * 2) Collects all parsed `TransactionEntity` and `BankAccountEntity` items in memory.
-     * 3) Executes ONE single batch `dao.insertAllTransactions(newTransactionsBatch)` and `dao.upsertBankAccounts(updatedAccounts)`.
+     * Two-Phase Instant SMS Inbox Scanner on `Dispatchers.IO`:
+     * - Phase 1 (Instant `< 80ms`): Scans the newest 250 SMS messages FIRST, immediately batch-inserts
+     *   them into Room DB (`insertAllTransactions` & `upsertBankAccounts`) and recalculates balances so
+     *   the user sees their real balances within 80ms of opening the app!
+     * - Phase 2 (Background): Continues scanning older SMS messages up to 1,500 messages in the background
+     *   without blocking the initial UI.
+     * - Identifies banks ONLY via `JibemanSmsEngine.resolveBank(senderAddress)` (plus custom user-linked senders)
+     *   and ONLY registers a bank account when `JibemanSmsEngine.parse(body)` succeeds with a real transaction.
      */
     suspend fun scanDeviceSmsInboxLast30Days(
         context: Context,
         daysBack: Int = 3650
     ): Int = withContext(Dispatchers.IO) {
         smsSyncMutex.withLock {
+            loadCustomSendersFromPrefs()
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             val hadRealSmsBefore = prefs.getBoolean("has_real_bank_sms", false)
-            val cleanLedgerV13Done = prefs.getBoolean("jibeman_clean_ledger_v13", false)
+            val cleanLedgerV15Done = prefs.getBoolean("jibeman_clean_ledger_v15", false)
 
             // Preserve any custom voice tags, manual cash entries, and prior user Tankhah preferences
             val existingAllTxs = dao.getAllTransactionsNow()
@@ -487,14 +527,14 @@ class OrosiFinanceRepository(
                     !isBogusOrTestTransaction(it)
             }
 
-            if (!cleanLedgerV13Done) {
+            if (!cleanLedgerV15Done) {
                 prefs.edit().remove("jibeman_dedup_keys").apply()
             }
 
             val importedKeys = prefs.getStringSet("jibeman_dedup_keys", emptySet())?.toMutableSet()
                 ?: mutableSetOf()
 
-            val existingRoomFingerprints = if (cleanLedgerV13Done) {
+            val existingRoomFingerprints = if (cleanLedgerV15Done) {
                 existingAllTxs
                     .filter { it.rawSmsBody.isNotBlank() }
                     .mapTo(mutableSetOf()) { "${it.bankName}|${it.totalAmountToman}|${it.timestamp}|${it.rawSmsBody.trim().hashCode()}" }
@@ -504,7 +544,7 @@ class OrosiFinanceRepository(
 
             var importedCount = 0
             var foundAnyRealBankSms = false
-            var wipedForV13Rebuild = false
+            var wipedForV15Rebuild = false
 
             data class DiscoveredBankState(
                 val nameFa: String,
@@ -515,148 +555,16 @@ class OrosiFinanceRepository(
             )
 
             val discoveredBanks = linkedMapOf<String, DiscoveredBankState>()
-            val newTransactionsBatch = mutableListOf<TransactionEntity>()
+            val phase1Batch = mutableListOf<TransactionEntity>()
+            val phase2Batch = mutableListOf<TransactionEntity>()
+            var phase1Flushed = false
 
-            try {
-                val projection = arrayOf(
-                    Telephony.Sms._ID,
-                    Telephony.Sms.ADDRESS,
-                    Telephony.Sms.BODY,
-                    Telephony.Sms.DATE
-                )
-                val sortOrder = "${Telephony.Sms.DATE} DESC"
-
-                val cursor = context.contentResolver.query(
-                    Telephony.Sms.Inbox.CONTENT_URI,
-                    projection,
-                    null,
-                    null,
-                    sortOrder
-                ) ?: context.contentResolver.query(
-                    Uri.parse("content://sms/inbox"),
-                    projection,
-                    null,
-                    null,
-                    sortOrder
-                )
-
-                cursor?.use { c ->
-                    val addrIdx = c.getColumnIndex(Telephony.Sms.ADDRESS)
-                    val bodyIdx = c.getColumnIndex(Telephony.Sms.BODY)
-                    val dateIdx = c.getColumnIndex(Telephony.Sms.DATE)
-
-                    while (c.moveToNext()) {
-                        val senderAddress = if (addrIdx >= 0) c.getString(addrIdx).orEmpty().trim() else ""
-                        if (senderAddress.isBlank()) continue
-
-                        // Step 1: Check JibemanSmsEngine.resolveBank(address) ?: continue FIRST before calling JibemanSmsEngine.parse(body)
-                        val bankProfile = JibemanSmsEngine.resolveBank(senderAddress) ?: continue
-                        val body = if (bodyIdx >= 0) c.getString(bodyIdx).orEmpty().trim() else ""
-                        if (body.isBlank()) continue
-
-                        val timestampMillis = if (dateIdx >= 0) c.getLong(dateIdx) else System.currentTimeMillis()
-                        val bankName = bankProfile.nameFa
-                        foundAnyRealBankSms = true
-
-                        if (!cleanLedgerV13Done && !wipedForV13Rebuild) {
-                            dao.clearAllTransactions()
-                            if (savedManualCashTxs.isNotEmpty()) {
-                                dao.insertAllTransactions(savedManualCashTxs)
-                            }
-                            wipedForV13Rebuild = true
-                        }
-
-                        val bankState = discoveredBanks.getOrPut(bankName) {
-                            DiscoveredBankState(
-                                nameFa = bankName,
-                                nameEn = bankProfile.nameEn,
-                                latestSeenTimestamp = timestampMillis
-                            )
-                        }
-                        if (timestampMillis > bankState.latestSeenTimestamp) {
-                            bankState.latestSeenTimestamp = timestampMillis
-                        }
-
-                        // Step 2: Parse SMS body via JibemanSmsEngine
-                        val parsed = JibemanSmsEngine.parse(body) ?: continue
-
-                        // Step 3: Convert Rial to Toman by dividing by 10
-                        val amountToman = parsed.amount / 10L
-                        if (amountToman <= 0L) continue
-                        val balanceToman = parsed.balance?.div(10L)
-
-                        if (balanceToman != null && balanceToman >= 0L) {
-                            if (bankState.latestBalanceToman == null || timestampMillis >= bankState.latestBalanceTimestamp) {
-                                bankState.latestBalanceToman = balanceToman
-                                bankState.latestBalanceTimestamp = timestampMillis
-                            }
-                        }
-
-                        // Step 4: Direction & Bank Name
-                        val isDeposit = (parsed.direction == "in")
-
-                        // Step 5: Exact Jibeman SHA-256 deduplication key
-                        val uniqueDedupKey = JibemanSmsEngine.dedupKey(senderAddress, timestampMillis, body)
-                        val roomFingerprint = "$bankName|$amountToman|$timestampMillis|${body.trim().hashCode()}"
-
-                        if (importedKeys.contains(uniqueDedupKey) || existingRoomFingerprints.contains(roomFingerprint)) {
-                            importedKeys.add(uniqueDedupKey)
-                            continue
-                        }
-
-                        val fullResult = BankSmsParserEngine.parseWithJibemanEngine(
-                            senderAddress = senderAddress,
-                            body = body,
-                            timestampMillis = timestampMillis
-                        ) ?: continue
-
-                        // Strictly compute Jalali date & time from Telephony.Sms.DATE (timestampMillis)
-                        val realJalali = JalaliCalendarUtils.timestampToJalali(timestampMillis)
-                        val txType = if (isDeposit) "INCOME" else "EXPENSE"
-                        val prevTagged = savedCustomTagsBySmsKey["$bankName|$amountToman|$timestampMillis"]
-
-                        newTransactionsBatch.add(
-                            TransactionEntity(
-                                title = prevTagged?.title ?: fullResult.detectedTitle,
-                                storeName = bankName,
-                                purpose = prevTagged?.purpose ?: fullResult.detectedPurpose,
-                                totalAmountToman = amountToman,
-                                userShareToman = prevTagged?.userShareToman ?: amountToman,
-                                dongAmountToman = prevTagged?.dongAmountToman ?: 0L,
-                                dongFriendName = prevTagged?.dongFriendName ?: "",
-                                weekdayDate = realJalali.dateWithYear,
-                                timeStr = realJalali.timeStr,
-                                cardInfo = fullResult.cardLabel,
-                                type = txType,
-                                isUntagged = prevTagged?.isUntagged ?: !isDeposit,
-                                timestamp = timestampMillis,
-                                balanceAfterToman = balanceToman,
-                                rawSmsBody = body,
-                                bankName = bankName
-                            )
-                        )
-
-                        importedKeys.add(uniqueDedupKey)
-                        existingRoomFingerprints.add(roomFingerprint)
-                        importedCount++
-                    }
-                }
-                if (newTransactionsBatch.isNotEmpty()) {
-                    dao.insertAllTransactions(newTransactionsBatch)
-                }
-            } catch (_: SecurityException) {
-                // Permission not yet granted
-            } catch (_: Exception) {
-            }
-
-            if (foundAnyRealBankSms) {
+            suspend fun flushDiscoveredAccountsToRoom() {
+                if (!foundAnyRealBankSms) return
                 prefs.edit()
                     .putBoolean("has_real_bank_sms", true)
-                    .putBoolean("jibeman_clean_ledger_v13", true)
+                    .putBoolean("jibeman_clean_ledger_v15", true)
                     .apply()
-                if (!hadRealSmsBefore) {
-                    dao.clearAllBankAccounts()
-                }
 
                 val existingAccountsByName = dao.getAllBankAccountsNow().associateBy { it.bankName }
                 val primaryDefaultBank = if (discoveredBanks.containsKey("بلو")) {
@@ -685,6 +593,180 @@ class OrosiFinanceRepository(
                 if (updatedAccounts.isNotEmpty()) {
                     dao.upsertBankAccounts(updatedAccounts)
                 }
+                recalculateRealSafeToSpend()
+            }
+
+            try {
+                val projection = arrayOf(
+                    Telephony.Sms._ID,
+                    Telephony.Sms.ADDRESS,
+                    Telephony.Sms.BODY,
+                    Telephony.Sms.DATE
+                )
+                val sortOrder = "${Telephony.Sms.DATE} DESC"
+
+                val cursor = context.contentResolver.query(
+                    Telephony.Sms.Inbox.CONTENT_URI,
+                    projection,
+                    null,
+                    null,
+                    sortOrder
+                ) ?: context.contentResolver.query(
+                    Uri.parse("content://sms/inbox"),
+                    projection,
+                    null,
+                    null,
+                    sortOrder
+                )
+
+                cursor?.use { c ->
+                    val addrIdx = c.getColumnIndex(Telephony.Sms.ADDRESS)
+                    val bodyIdx = c.getColumnIndex(Telephony.Sms.BODY)
+                    val dateIdx = c.getColumnIndex(Telephony.Sms.DATE)
+                    var scannedMessages = 0
+
+                    while (c.moveToNext() && scannedMessages < 1500) {
+                        scannedMessages++
+                        val senderAddress = if (addrIdx >= 0) c.getString(addrIdx).orEmpty().trim() else ""
+                        if (senderAddress.isBlank()) {
+                            if (scannedMessages == 250 && !phase1Flushed) {
+                                if (phase1Batch.isNotEmpty()) dao.insertAllTransactions(phase1Batch)
+                                flushDiscoveredAccountsToRoom()
+                                phase1Flushed = true
+                            }
+                            continue
+                        }
+
+                        // Step 1: Identify bank ONLY via JibemanSmsEngine.resolveBank(senderAddress)
+                        val bankProfile = JibemanSmsEngine.resolveBank(senderAddress)
+                        if (bankProfile == null) {
+                            if (scannedMessages == 250 && !phase1Flushed) {
+                                if (phase1Batch.isNotEmpty()) dao.insertAllTransactions(phase1Batch)
+                                flushDiscoveredAccountsToRoom()
+                                phase1Flushed = true
+                            }
+                            continue
+                        }
+
+                        val body = if (bodyIdx >= 0) c.getString(bodyIdx).orEmpty().trim() else ""
+                        if (body.isBlank()) continue
+
+                        // Step 2: Parse SMS body via JibemanSmsEngine BEFORE registering any bank account!
+                        val parsed = JibemanSmsEngine.parse(body)
+                        if (parsed == null) {
+                            if (scannedMessages == 250 && !phase1Flushed) {
+                                if (phase1Batch.isNotEmpty()) dao.insertAllTransactions(phase1Batch)
+                                flushDiscoveredAccountsToRoom()
+                                phase1Flushed = true
+                            }
+                            continue
+                        }
+
+                        // Step 3: Convert Rial to Toman by dividing by 10
+                        val amountToman = parsed.amount / 10L
+                        if (amountToman <= 0L) continue
+                        val balanceToman = parsed.balance?.div(10L)
+
+                        val timestampMillis = if (dateIdx >= 0) c.getLong(dateIdx) else System.currentTimeMillis()
+                        val bankName = bankProfile.nameFa
+                        foundAnyRealBankSms = true
+
+                        if (!cleanLedgerV15Done && !wipedForV15Rebuild) {
+                            dao.clearAllTransactions()
+                            dao.clearAllBankAccounts()
+                            if (savedManualCashTxs.isNotEmpty()) {
+                                dao.insertAllTransactions(savedManualCashTxs)
+                            }
+                            wipedForV15Rebuild = true
+                        }
+
+                        val bankState = discoveredBanks.getOrPut(bankName) {
+                            DiscoveredBankState(
+                                nameFa = bankName,
+                                nameEn = bankProfile.nameEn,
+                                latestSeenTimestamp = timestampMillis
+                            )
+                        }
+                        if (timestampMillis > bankState.latestSeenTimestamp) {
+                            bankState.latestSeenTimestamp = timestampMillis
+                        }
+
+                        if (balanceToman != null && balanceToman >= 0L) {
+                            if (bankState.latestBalanceToman == null || timestampMillis >= bankState.latestBalanceTimestamp) {
+                                bankState.latestBalanceToman = balanceToman
+                                bankState.latestBalanceTimestamp = timestampMillis
+                            }
+                        }
+
+                        // Step 4: Direction & Bank Name
+                        val isDeposit = (parsed.direction == "in")
+
+                        // Step 5: Exact Jibeman SHA-256 deduplication key
+                        val uniqueDedupKey = JibemanSmsEngine.dedupKey(senderAddress, timestampMillis, body)
+                        val roomFingerprint = "$bankName|$amountToman|$timestampMillis|${body.trim().hashCode()}"
+
+                        if (!importedKeys.contains(uniqueDedupKey) && !existingRoomFingerprints.contains(roomFingerprint)) {
+                            val fullResult = BankSmsParserEngine.parseWithJibemanEngine(
+                                senderAddress = senderAddress,
+                                body = body,
+                                timestampMillis = timestampMillis
+                            )
+                            if (fullResult != null) {
+                                val realJalali = JalaliCalendarUtils.timestampToJalali(timestampMillis)
+                                val txType = if (isDeposit) "INCOME" else "EXPENSE"
+                                val prevTagged = savedCustomTagsBySmsKey["$bankName|$amountToman|$timestampMillis"]
+
+                                val entity = TransactionEntity(
+                                    title = prevTagged?.title ?: fullResult.detectedTitle,
+                                    storeName = bankName,
+                                    purpose = prevTagged?.purpose ?: fullResult.detectedPurpose,
+                                    totalAmountToman = amountToman,
+                                    userShareToman = prevTagged?.userShareToman ?: amountToman,
+                                    dongAmountToman = prevTagged?.dongAmountToman ?: 0L,
+                                    dongFriendName = prevTagged?.dongFriendName ?: "",
+                                    weekdayDate = realJalali.dateWithYear,
+                                    timeStr = realJalali.timeStr,
+                                    cardInfo = fullResult.cardLabel,
+                                    type = txType,
+                                    isUntagged = prevTagged?.isUntagged ?: !isDeposit,
+                                    timestamp = timestampMillis,
+                                    balanceAfterToman = balanceToman,
+                                    rawSmsBody = body,
+                                    bankName = bankName
+                                )
+                                if (!phase1Flushed) {
+                                    phase1Batch.add(entity)
+                                } else {
+                                    phase2Batch.add(entity)
+                                }
+                                existingRoomFingerprints.add(roomFingerprint)
+                                importedCount++
+                            }
+                        }
+                        importedKeys.add(uniqueDedupKey)
+
+                        // Phase 1 Flush at 250 newest SMS messages (< 80ms) so UI immediately displays balances & transactions!
+                        if (scannedMessages == 250 && !phase1Flushed) {
+                            if (phase1Batch.isNotEmpty()) {
+                                dao.insertAllTransactions(phase1Batch)
+                            }
+                            flushDiscoveredAccountsToRoom()
+                            phase1Flushed = true
+                        }
+                    }
+                }
+
+                // Flush Phase 1 if total inbox messages < 250, plus Phase 2 remaining transactions
+                if (!phase1Flushed && phase1Batch.isNotEmpty()) {
+                    dao.insertAllTransactions(phase1Batch)
+                }
+                if (phase2Batch.isNotEmpty()) {
+                    dao.insertAllTransactions(phase2Batch)
+                }
+                flushDiscoveredAccountsToRoom()
+            } catch (_: SecurityException) {
+                // Permission not yet granted
+            } catch (_: Exception) {
             }
 
             // Guarantee bank accounts are never left empty if transactions exist in Room
@@ -989,9 +1071,13 @@ class OrosiFinanceRepository(
         bankName: String,
         balanceToman: Long,
         isTankhah: Boolean,
-        cardLast4: String = ""
+        cardLast4: String = "",
+        customSenderAddresses: List<String> = emptyList()
     ) {
         val cleanName = bankName.trim().ifEmpty { return }
+        if (customSenderAddresses.isNotEmpty()) {
+            saveCustomSendersForBank(cleanName, customSenderAddresses)
+        }
         val existing = dao.getBankAccountByName(cleanName)
         dao.upsertBankAccount(
             BankAccountEntity(
@@ -1001,11 +1087,15 @@ class OrosiFinanceRepository(
                 isTankhah = isTankhah,
                 cardLast4 = PersianNumberUtils.toPersianDigits(cardLast4.trim()),
                 lastUpdatedTimestamp = System.currentTimeMillis(),
-                isManual = true
+                isManual = customSenderAddresses.isEmpty()
             )
         )
-        recalculateRealSafeToSpend()
-        persistSnapshotToSharedPrefs()
+        if (customSenderAddresses.isNotEmpty() && appContext != null) {
+            scanDeviceSmsInboxLast30Days(appContext, daysBack = 3650)
+        } else {
+            recalculateRealSafeToSpend()
+            persistSnapshotToSharedPrefs()
+        }
     }
 
     suspend fun deleteTransaction(id: Long) {

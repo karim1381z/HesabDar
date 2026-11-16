@@ -107,13 +107,25 @@ import com.example.ui.theme.OrosiSurfaceLowest
 import com.example.ui.theme.PersianLapis
 import com.example.ui.theme.PersianLapisDeep
 import com.example.ui.theme.PersianLapisLight
+import androidx.compose.runtime.SideEffect
+import androidx.core.view.WindowCompat
 import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = false
+            isAppearanceLightNavigationBars = false
+        }
         setContent {
+            SideEffect {
+                WindowCompat.getInsetsController(window, window.decorView).apply {
+                    isAppearanceLightStatusBars = false
+                    isAppearanceLightNavigationBars = false
+                }
+            }
             MyApplicationTheme {
                 val viewModel: OrosiViewModel = viewModel()
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -483,8 +495,8 @@ fun OrosiFinanceApp(
 
     if (uiState.showAddBankAccountModal) {
         AddBankAccountBottomSheet(
-            onAddAccount = { bankName, balanceToman, isTankhah, cardLast4 ->
-                viewModel.addOrUpdateBankAccount(bankName, balanceToman, isTankhah, cardLast4)
+            onAddAccount = { bankName, balanceToman, isTankhah, cardLast4, customSenders ->
+                viewModel.addOrUpdateBankAccount(bankName, balanceToman, isTankhah, cardLast4, customSenders)
             },
             onDismiss = { viewModel.setShowAddBankAccountModal(false) }
         )
