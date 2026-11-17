@@ -739,9 +739,36 @@ fun VoiceOverlayBottomSheet(
                 }
             }
 
-            val canConfirm = (targetTx != null || voiceState.totalAmountToman > 0L) &&
+            val hasBankMismatch = targetTx != null && voiceState.hasBankAmountMismatch
+            if (hasBankMismatch) {
+                val spokenFmt = PersianNumberUtils.formatToman(voiceState.conflictingSpokenAmountToman, showUnit = true)
+                val bankFmt = PersianNumberUtils.formatToman(targetTx!!.totalAmountToman, showUnit = true)
+                val diffFmt = PersianNumberUtils.formatToman(
+                    kotlin.math.abs(voiceState.conflictingSpokenAmountToman - targetTx.totalAmountToman),
+                    showUnit = true
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(RubyRose.copy(alpha = 0.22f))
+                        .border(1.dp, RubyRoseSoft, RoundedCornerShape(14.dp))
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                        .testTag("voice_bank_amount_mismatch_warning")
+                ) {
+                    Text(
+                        text = "⚠️ عدم تطابق مبلغ با پیامک بانک: مبلغ گفته‌شده ($spokenFmt) با مبلغ پیامک بانک ($bankFmt) به اندازه $diffFmt اختلاف دارد. لطفاً مبلغ را اصلاح کنید تا ثبت فعال شود.",
+                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                        color = RubyRoseSoft
+                    )
+                }
+            }
+
+            val canConfirm = !hasBankMismatch &&
+                (targetTx != null || voiceState.totalAmountToman > 0L) &&
                 voiceState.purposeCategory.isNotBlank()
-            if (!canConfirm) {
+            if (!canConfirm && !hasBankMismatch) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     text = if (targetTx == null) {
@@ -2555,7 +2582,7 @@ fun PaydayAndBackupBottomSheet(
                             color = AlabasterSilk
                         )
                         Text(
-                            text = "بررسی خودکار ۱۵ سناریوی صوتی، پیامکی، تقویم و بانک‌ها بدون نیاز به تست دستی",
+                            text = "بررسی خودکار ۲۵ سناریوی صوتی، پیامکی، تقویم و بانک‌ها بدون نیاز به تست دستی",
                             style = MaterialTheme.typography.labelSmall,
                             color = OrosiOnSurfaceVariant
                         )
@@ -2606,7 +2633,7 @@ fun PaydayAndBackupBottomSheet(
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = if (regressionReport == null) {
-                            "اجرای تست خودکار رگرسیون و استرس (۱۵ سناریو)"
+                            "اجرای تست خودکار رگرسیون و استرس (۲۵ سناریو)"
                         } else {
                             "اجرای مجدد تست استرس (${PersianNumberUtils.toPersianDigits(regressionReport!!.totalDurationMs.toString())} میلی‌ثانیه)"
                         },

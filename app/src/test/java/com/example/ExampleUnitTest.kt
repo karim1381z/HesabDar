@@ -373,6 +373,86 @@ class ExampleUnitTest {
     }
 
     @Test
+    fun testVideo55BatchAndBatch10StressScenarios() {
+        // 1. Video 55batch (00:05): Summary intro total before itemized breakdown
+        val summaryBreakdown = PersianVoiceSlangParserEngine.parseMultiVoiceCommands(
+            "رفتم بیرون و اومدم کلاً ۵۰ هزار تومان خرج کردم ۲۵ تومن بستنی ۲۵ تومن دمپایی"
+        )
+        assertEquals(2, summaryBreakdown.size)
+        assertEquals("بستنی", summaryBreakdown[0].purposeCategory)
+        assertEquals(25_000L, summaryBreakdown[0].totalAmountToman)
+        assertEquals("دمپایی", summaryBreakdown[1].purposeCategory)
+        assertEquals(25_000L, summaryBreakdown[1].totalAmountToman)
+
+        // 2. Video 55batch (00:41): Suffix "تومانش" + sub-thousand 500 Toman remainder on 49,500 Toman SMS
+        val subThousand49500 = PersianVoiceSlangParserEngine.parseVoiceCommand(
+            rawSpeech = "۴۹ تومانش بابت بستنی ۵۰۰ تومانش بابت کاغذ",
+            fallbackTotalToman = 49_500L,
+            defaultBankName = "بلو"
+        )
+        assertEquals("بستنی (۴۹,۰۰۰) + کاغذ (۵۰۰)", subThousand49500.purposeCategory)
+        assertEquals(49_500L, subThousand49500.totalAmountToman)
+
+        // 3. Video 55batch (00:58): Conflicting spoken amount on bank SMS ("۸۵ تومن بابت بستنی" on 80,000 Toman SMS)
+        assertEquals(
+            85_000L,
+            PersianVoiceSlangParserEngine.detectBankSmsAmountMismatch(
+                rawSpeech = "۸۵ تومن بابت بستنی",
+                fallbackTotalToman = 80_000L
+            )
+        )
+        assertNull(
+            PersianVoiceSlangParserEngine.detectBankSmsAmountMismatch(
+                rawSpeech = "بستنی",
+                fallbackTotalToman = 80_000L
+            )
+        )
+
+        // 4. Video 55batch (01:13): Stumbled number correction ("۲۱۷ ۲۱۸ تومن") + 218 Toman fee on 107,218 Toman SMS
+        val stumbledFee = PersianVoiceSlangParserEngine.parseVoiceCommand(
+            rawSpeech = "۱۰۷ تومن بابت انتقال پول و ۲۱۷ ۲۱۸ تومن بابت کارمزد",
+            fallbackTotalToman = 107_218L,
+            defaultBankName = "بلو"
+        )
+        assertEquals("انتقال پول (۱۰۷,۰۰۰) + کارمزد (۲۱۸)", stumbledFee.purposeCategory)
+        assertEquals(107_218L, stumbledFee.totalAmountToman)
+
+        // 5. Video 55batch_10 (00:08): Preserving item noun across "می‌خواستم ۳۹ تومن بدم ولی ۴۹ تومن دادم"
+        val carriedIceCream = PersianVoiceSlangParserEngine.parseVoiceCommand(
+            "سلام رفتم بیرون اومدم بعد یادمه که برای دوتا بستنی می‌خواستم ۳۹ تومن بدم ولی ۴۹ تومن دادم"
+        )
+        assertEquals("۲ تا بستنی", carriedIceCream.purposeCategory)
+        assertEquals(49_000L, carriedIceCream.totalAmountToman)
+
+        // 6. Video 55batch_10 (00:35, 00:42, 00:58, 01:20): Self-corrections and "بود" deduplication
+        val nahCorrected = PersianVoiceSlangParserEngine.parseMultiVoiceCommands(
+            "۵۰ تومن نانوایی نه نه نه نه ۳۵ تومن نانوایی"
+        )
+        assertEquals(1, nahCorrected.size)
+        assertEquals("نانوایی", nahCorrected[0].purposeCategory)
+        assertEquals(35_000L, nahCorrected[0].totalAmountToman)
+
+        val sameNounCorrected = PersianVoiceSlangParserEngine.parseMultiVoiceCommands(
+            "۵۰ تومان نانوایی ۳۵ تومن نانوایی"
+        )
+        assertEquals(1, sameNounCorrected.size)
+        assertEquals("نانوایی", sameNounCorrected[0].purposeCategory)
+        assertEquals(35_000L, sameNounCorrected[0].totalAmountToman)
+
+        val boudCorrected = PersianVoiceSlangParserEngine.parseVoiceCommand(
+            "۵۰ تومن نانوایی بود نه نه نه نه ۳۵ تومن بود نانوایی"
+        )
+        assertEquals("نانوایی", boudCorrected.purposeCategory)
+        assertEquals(35_000L, boudCorrected.totalAmountToman)
+
+        val boudDeduped = PersianVoiceSlangParserEngine.parseVoiceCommand(
+            "۵۰ تومان نانوایی بود نانوایی"
+        )
+        assertEquals("نانوایی", boudDeduped.purposeCategory)
+        assertEquals(50_000L, boudDeduped.totalAmountToman)
+    }
+
+    @Test
     fun testFullOrosiRegressionAndStressSuitePasses100Percent() {
         val report = com.example.domain.OrosiRegressionSuite.runFullRegressionAndStressSuite()
         for (r in report.results) {
@@ -383,8 +463,8 @@ class ExampleUnitTest {
             )
         }
         assertEquals(true, report.allPassed)
-        assertEquals(15, report.totalCount)
-        assertEquals(15, report.passedCount)
+        assertEquals(25, report.totalCount)
+        assertEquals(25, report.passedCount)
     }
 }
 

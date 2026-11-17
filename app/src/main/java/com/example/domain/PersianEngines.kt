@@ -1030,6 +1030,9 @@ object PersianVoiceSlangParserEngine {
         "یادم نیست",
         "یادم نمیاد",
         "یادم نمی‌آد",
+        "یادم هست",
+        "یادمه که",
+        "بعد یادمه",
         "چی بود",
         "پرداخت کردم",
         "کارت کشیدم",
@@ -1039,7 +1042,8 @@ object PersianVoiceSlangParserEngine {
         "پول دادم",
         "حساب کردم",
         "رفتم بیرون",
-        "بیرون رفتم"
+        "بیرون رفتم",
+        "اشتباه شد"
     )
 
     // Note: "برای", "بابت", "بابتِ", "واسه" are intentionally NOT in singleWordConversationalFillers
@@ -1051,6 +1055,7 @@ object PersianVoiceSlangParserEngine {
         "درود",
         "والا",
         "ولی",
+        "اما",
         "رفتم",
         "بیرون",
         "اومدم",
@@ -1060,24 +1065,42 @@ object PersianVoiceSlangParserEngine {
         "دیروز",
         "دیشب",
         "پریروز",
+        "بعد",
+        "یادمه",
         "کلاً",
         "کلا",
         "جمعاً",
         "جمعا",
+        "مجموعاً",
+        "مجموعا",
+        "سرجمع",
         "خریدم",
         "گرفتم",
         "دادم",
         "کردم",
         "زدم",
         "شد",
+        "بود",
+        "بودش",
+        "هست",
+        "نبود",
+        "ببخشید",
+        "یعنی",
+        "منظورم",
+        "هزارش",
         "هزار",
+        "تومانش",
+        "تومنش",
         "تومان",
         "تومن",
+        "ریالش",
+        "ریال",
         "میلیون",
         "میلیارد"
     )
 
     private val narrativeIntroTriggerWords = listOf(
+        "سلام",
         "رفتم",
         "بیرون",
         "اومدم",
@@ -1087,10 +1110,16 @@ object PersianVoiceSlangParserEngine {
         "دیروز",
         "دیشب",
         "پریروز",
+        "بعد",
+        "یادمه",
+        "یادم هست",
         "کلاً",
         "کلا",
         "جمعاً",
         "جمعا",
+        "مجموعاً",
+        "مجموعا",
+        "سرجمع",
         "خرج کردم",
         "پول دادم",
         "کارت کشیدم",
@@ -1121,7 +1150,7 @@ object PersianVoiceSlangParserEngine {
     )
 
     private val currencyAndMultiplierWords = setOf(
-        "تومان", "تومن", "تومنش", "تومانش", "هزار", "میلیون", "ملیون", "میلیارد", "ریال"
+        "تومان", "تومن", "تومنش", "تومانش", "هزار", "هزارش", "میلیون", "ملیون", "میلیارد", "ریال", "ریالش"
     )
 
     private val compoundMoneyPrefixWords = setOf(
@@ -1144,17 +1173,85 @@ object PersianVoiceSlangParserEngine {
     }
 
     /**
+     * Strips bare stumbled numbers immediately preceding `<number> <currency>`
+     * (e.g. "۲۱۷ ۲۱۸ تومن بابت کارمزد" -> "۲۱۸ تومن بابت کارمزد").
+     */
+    fun stripStumbledNumbers(rawText: String): String {
+        val normalized = PersianNumberUtils.normalizePersianText(rawText)
+        val stumbleRegex = Regex(
+            """(?<=^|\s)[۰-۹0-9,٬،]+(?:\s+[۰-۹0-9,٬،]+)*(?=\s+[۰-۹0-9,٬،]+\s*(?:میلیارد|میلیون|ملیون|هزار\s*تومانش|هزار\s*تومنش|هزار\s*تومان|هزار\s*تومن|هزارش|هزار|تومانش|تومنش|تومان|تومن|ریالش|ریال)(?=\s|$))"""
+        )
+        return stumbleRegex.replace(normalized, " ").replace(Regex("""\s+"""), " ").trim()
+    }
+
+    /**
+     * Strips standalone negation/correction "نه" ("no") while preserving "نه" when used as the number 9
+     * (e.g., "سی و نه تومن", "نه هزار تومان", "نه تا بستنی").
+     */
+    private fun stripNonNumericNahTokens(rawText: String): String {
+        var text = PersianNumberUtils.normalizePersianText(rawText)
+        // Repeated "نه نه..." is always "no, no...", never the number 9
+        text = text.replace(Regex("""(?<=^|\s)نه(?:\s+نه)+(?=\s|$)"""), " ")
+
+        val unitsAndCurrency = (currencyAndMultiplierWords + countingUnits).joinToString("|")
+        val prefixTensPattern = compoundMoneyPrefixWords.joinToString("|")
+        val standaloneNahRegex = Regex("""(?<=^|\s)نه(?=\s|$)""")
+
+        return standaloneNahRegex.replace(text) { match ->
+            val before = text.substring(0, match.range.first).trimEnd()
+            val after = text.substring(match.range.last + 1).trimStart()
+            val isCompoundNine = Regex("""(?:$prefixTensPattern)\s+و$""").containsMatchIn(before)
+            val isFollowedByUnitOrCurrency = Regex("""^(?:$unitsAndCurrency)(?=\s|$)""").containsMatchIn(after)
+            if (isCompoundNine || isFollowedByUnitOrCurrency) {
+                match.value
+            } else {
+                " "
+            }
+        }.replace(Regex("""\s+"""), " ").trim()
+    }
+
+    /**
+     * Resolves mid-speech self-corrections where the user states an amount, says a correction marker
+     * (`نه نه...`, `نبود`, `بود نه`, `اشتباه شد`, `ببخشید`, `یعنی`, `منظورم`, or `نه` before a new number),
+     * and then states the corrected amount (e.g. "۵۰ تومن نانوایی بود نه نه نه نه ۳۵ تومن بود نانوایی" -> "۳۵ تومن نانوایی").
+     */
+    fun resolveMidSpeechSelfCorrections(rawText: String): String {
+        val normalized = stripStumbledNumbers(PersianNumberUtils.normalizePersianText(rawText))
+        val correctionRegex = Regex(
+            """^(.*?)(?<=^|\s)(?:(?:نه\s+)+نه|بود\s+نه(?:\s+نه)*|نبود(?:\s+نه)*|اشتباه\s+شد|ببخشید|منظورم|یعنی|نه(?=\s+[۰-۹0-9]))(?=\s|$)\s*(.+)$"""
+        )
+        val match = correctionRegex.find(normalized) ?: return stripNonNumericNahTokens(normalized)
+        val leftPart = match.groupValues[1].trim()
+        val rightPart = resolveMidSpeechSelfCorrections(match.groupValues[2].trim())
+
+        val leftAmount = parseSpokenPersianAmountToman(leftPart)
+        val rightAmount = parseSpokenPersianAmountToman(rightPart)
+        if (leftAmount > 0L && rightAmount > 0L) {
+            val leftParsed = parseSingleVoiceClause(leftPart, null, "نقدی / دستی")
+            val rightParsed = parseSingleVoiceClause(rightPart, null, "نقدی / دستی")
+            return if (rightParsed.purposeCategory.isNotBlank()) {
+                stripNonNumericNahTokens(rightPart)
+            } else if (leftParsed.purposeCategory.isNotBlank()) {
+                stripNonNumericNahTokens("$rightPart ${leftParsed.purposeCategory}")
+            } else {
+                stripNonNumericNahTokens(rightPart)
+            }
+        }
+        return stripNonNumericNahTokens(normalized)
+    }
+
+    /**
      * Strips stammered / mental-math counting and sub-price chains before the final item noun
      * (e.g., "دو تا سه تا ۵ تومن ۵ تومن نانوایی" -> "نانوایی").
      * Preserves single legitimate item quantities like "دو تا بستنی" or "یک شارژ ایرانسل".
      */
     fun stripMentalMathChains(rawText: String): String {
-        val text = PersianNumberUtils.normalizePersianText(rawText)
+        val text = stripStumbledNumbers(PersianNumberUtils.normalizePersianText(rawText))
         val unitsPattern = countingUnits.joinToString("|")
         val qtyWordsPattern = smallQuantityWords.keys.sortedByDescending { it.length }.joinToString("|")
         // Matches a single small count or sub-price phrase (e.g. "دو تا", "سه تا", "۵ تومن", "۱۰ تومن")
         val singleSmallCountOrSubPrice =
-            """(?:(?:$qtyWordsPattern|[۰-۹0-9]{1,2})\s*(?:$unitsPattern|تومان|تومن))"""
+            """(?:(?:$qtyWordsPattern|[۰-۹0-9]{1,2})\s*(?:$unitsPattern|تومانش|تومنش|تومان|تومن))"""
         val stammerChainRegex = Regex(
             """(?<=^|\s)$singleSmallCountOrSubPrice(?:\s+$singleSmallCountOrSubPrice)+(?=\s|$)"""
         )
@@ -1169,7 +1266,7 @@ object PersianVoiceSlangParserEngine {
      * First strips any back-to-back stammered mental-math chains ("دو تا سه تا ۵ تومن ۵ تومن").
      */
     fun protectItemQuantities(rawText: String): ProtectedQuantitiesText {
-        var text = stripMentalMathChains(rawText)
+        var text = stripNonNumericNahTokens(stripMentalMathChains(rawText))
             .replace(Regex("""سیب\s+زمینی"""), "سیب‌زمینی")
             .replace(Regex("""تخم\s+مرغ"""), "تخم‌مرغ")
             .replace(Regex("""گوجه\s+فرنگی"""), "گوجه‌فرنگی")
@@ -1181,7 +1278,7 @@ object PersianVoiceSlangParserEngine {
         val unitsPattern = countingUnits.joinToString("|")
         val qtyWordsPattern = smallQuantityWords.keys.sortedByDescending { it.length }.joinToString("|")
         val withUnitRegex = Regex(
-            """(?<=^|\s)($qtyWordsPattern|[۰-۹0-9]{1,2})\s+($unitsPattern)(?=\s+([^\s]+))"""
+            """(?<=^|\s)($qtyWordsPattern|[۰-۹0-9]{1,2})\s*($unitsPattern)(?=\s+([^\s]+))"""
         )
 
         text = withUnitRegex.replace(text) { match ->
@@ -1283,11 +1380,23 @@ object PersianVoiceSlangParserEngine {
     }
 
     private val leadingPrepositionsToStrip = listOf(
-        "به", "از", "برای", "بابتِ", "بابت", "تو", "توی", "در", "واسه"
+        "به", "از", "برای", "بابتِ", "بابت", "تو", "توی", "در", "واسه", "که"
     )
 
+    private fun deduplicateConsecutiveWords(input: String): String {
+        val tokens = input.split(Regex("""\s+""")).filter { it.isNotBlank() }
+        if (tokens.size <= 1) return tokens.joinToString(" ")
+        val deduped = mutableListOf<String>()
+        for (token in tokens) {
+            if (deduped.isEmpty() || deduped.last() != token) {
+                deduped.add(token)
+            }
+        }
+        return deduped.joinToString(" ")
+    }
+
     private fun trimLeadingPrepositionsAndVav(input: String): String {
-        var s = input.replace(Regex("""\s+"""), " ").trim()
+        var s = deduplicateConsecutiveWords(input.replace(Regex("""\s+"""), " ").trim())
         var changed = true
         while (changed) {
             changed = false
@@ -1297,6 +1406,10 @@ object PersianVoiceSlangParserEngine {
             }
             while (s.endsWith(" و")) {
                 s = s.removeSuffix(" و").trim()
+                changed = true
+            }
+            while (s.startsWith("ش ")) {
+                s = s.removePrefix("ش ").trim()
                 changed = true
             }
             for (prep in leadingPrepositionsToStrip) {
@@ -1314,12 +1427,13 @@ object PersianVoiceSlangParserEngine {
                 changed = true
             }
         }
-        if (s == "و" || s in leadingPrepositionsToStrip) return ""
+        s = deduplicateConsecutiveWords(s)
+        if (s == "و" || s == "ش" || s in leadingPrepositionsToStrip) return ""
         return s
     }
 
     private fun stripBasicFillersOnly(rawText: String): String {
-        var result = PersianNumberUtils.normalizePersianText(rawText)
+        var result = stripNonNumericNahTokens(PersianNumberUtils.normalizePersianText(rawText))
         for (phrase in multiWordConversationalFillers) {
             result = result.replace(Regex("""(?<=^|\s)$phrase(?=\s|$)"""), " ")
         }
@@ -1393,11 +1507,12 @@ object PersianVoiceSlangParserEngine {
 
     /**
      * Parses spoken Persian numbers and digits into Tomans while ignoring item quantities and mental-math sub-prices:
+     * - Strips bare stumbled numbers before `<number> <currency>` (e.g. "۲۱۷ ۲۱۸ تومن" -> "۲۱۸ تومن").
      * - When a clause contains multiple currency amounts (e.g. "۳۹ هزار تومان دادم به دو تا سه تا ۵ تومن ۵ تومن نانوایی"),
      *   takes the LARGEST explicit currency amount in that clause (`39,000` Tomans), ignoring smaller sub-amounts (`۵ تومن`).
      */
     fun parseSpokenPersianAmountToman(rawText: String): Long {
-        val cleaned = PersianNumberUtils.normalizePersianText(rawText.trim())
+        val cleaned = stripStumbledNumbers(PersianNumberUtils.normalizePersianText(rawText.trim()))
         if (cleaned.isBlank()) return 0L
 
         for ((phrase, amt) in exactPhraseAmounts) {
@@ -1409,7 +1524,9 @@ object PersianVoiceSlangParserEngine {
         val engWithoutPlaceholders = PersianNumberUtils.toEnglishDigits(textWithoutQtyPlaceholders)
 
         // 1. Check ALL numeric digit amounts in the clause and take the largest explicit currency amount
-        val digitRegex = Regex("""([0-9]+(?:\.[0-9]+)?)\s*(میلیارد|میلیون|ملیون|هزار\s*تومان|هزار\s*تومن|هزار|تومان|تومن|ریال)?""")
+        val digitRegex = Regex(
+            """([0-9]+(?:\.[0-9]+)?)\s*(میلیارد|میلیون|ملیون|هزار\s*تومانش|هزار\s*تومنش|هزار\s*تومان|هزار\s*تومن|هزارش|هزار|تومانش|تومنش|تومان|تومن|ریالش|ریال)?"""
+        )
         var maxDigitAmount = 0L
         for (digitMatch in digitRegex.findAll(engWithoutPlaceholders)) {
             val numVal = digitMatch.groupValues[1].toDoubleOrNull() ?: 0.0
@@ -1418,7 +1535,7 @@ object PersianVoiceSlangParserEngine {
                 val candidate = when {
                     unit == "میلیارد" -> (numVal * 1_000_000_000.0).toLong()
                     unit == "میلیون" || unit == "ملیون" -> (numVal * 1_000_000.0).toLong()
-                    unit == "ریال" -> (numVal / 10.0).toLong()
+                    unit == "ریال" || unit == "ریالش" -> (numVal / 10.0).toLong()
                     unit.startsWith("هزار") -> (numVal * 1_000.0).toLong()
                     numVal in 1.0..999.0 -> (numVal * 1_000.0).toLong()
                     else -> numVal.toLong()
@@ -1481,7 +1598,7 @@ object PersianVoiceSlangParserEngine {
             if (wordVal != null) {
                 currentGroup += wordVal
                 matchedAnyNumberWord = true
-                if (token.endsWith("تومان") || token.endsWith("تومن")) {
+                if (token.endsWith("تومان") || token.endsWith("تومن") || token.endsWith("تومانش") || token.endsWith("تومنش")) {
                     flushCurrentPhrase()
                 }
                 continue
@@ -1502,7 +1619,7 @@ object PersianVoiceSlangParserEngine {
                     matchedAnyNumberWord = true
                     hasExplicitMultiplier = true
                 }
-                "هزار" -> {
+                "هزار", "هزارش" -> {
                     val base = if (currentGroup > 0L) currentGroup else 1L
                     totalAccumulated += base * 1_000L
                     currentGroup = 0L
@@ -1523,7 +1640,7 @@ object PersianVoiceSlangParserEngine {
 
     /**
      * Formats multiple parsed voice commands into a single combined note for an existing bank SMS row:
-     * e.g. "۲ تا شارژ (۵۰,۰۰۰) + ۲ تا بستنی (۵۰,۰۰۰)" or "نانوایی (۵۰۰,۰۰۰) + شارژ ایرانسل (۳۰۰,۰۰۰)"
+     * e.g. "۲ تا شارژ (۵۰,۰۰۰) + ۲ تا بستنی (۵۰,۰۰۰)" or "بستنی (۴۹,۰۰۰) + کاغذ (۵۰۰)"
      */
     fun formatCombinedMultiVoiceNote(items: List<ParsedVoiceExpense>): String {
         return items.joinToString(" + ") { item ->
@@ -1551,6 +1668,14 @@ object PersianVoiceSlangParserEngine {
         "نمی‌خواستم"
     )
 
+    private fun hasHardNegationMarker(clause: String): Boolean {
+        val norm = PersianNumberUtils.normalizePersianText(clause.trim())
+        if (norm.isBlank()) return false
+        return negationAndCancellationMarkers.any { marker ->
+            Regex("""(?<=^|\s)$marker(?=\s|$)""").containsMatchIn(norm)
+        }
+    }
+
     /**
      * Rule B (Negation & Cancellation Filter):
      * Returns true if the clause contains a negation or cancellation marker such as
@@ -1560,29 +1685,38 @@ object PersianVoiceSlangParserEngine {
     fun isNegatedOrCancelledClause(clause: String): Boolean {
         val norm = PersianNumberUtils.normalizePersianText(clause.trim())
         if (norm.isBlank()) return false
-        for (marker in negationAndCancellationMarkers) {
-            if (Regex("""(?<=^|\s)$marker(?=\s|$)""").containsMatchIn(norm)) {
-                return true
-            }
-        }
+        if (hasHardNegationMarker(norm)) return true
         val hasWantedTo = Regex("""(?<=^|\s)(?:میخواستم|می‌خواستم|میخواهم|میخوام)(?=\s|$)""").containsMatchIn(norm)
         val hasBut = Regex("""(?<=^|\s)(?:ولی|اما)(?=\s|$)""").containsMatchIn(norm)
         return hasWantedTo && hasBut
     }
 
     /**
+     * Extracts the intended item subject from a soft-cancelled "می‌خواستم X بدم ولی" clause
+     * so that if the immediately following clause ("۴۹ تومن دادم") omits the noun, the subject ("۲ تا بستنی") is preserved.
+     */
+    private fun extractSubjectFromSoftCancelledClause(cancelledClause: String): String {
+        val stripped = PersianNumberUtils.normalizePersianText(cancelledClause)
+            .replace(Regex("""(?<=^|\s)(?:میخواستم|می‌خواستم|میخواهم|میخوام|بدم|بخرم|بگیرم|ولی|اما)(?=\s|$)"""), " ")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+        if (stripped.isBlank()) return ""
+        return parseSingleVoiceClause(stripped, null, "نقدی / دستی").purposeCategory
+    }
+
+    /**
      * Rule A (Asyndetic Clause Splitting):
      * Splits consecutive clauses even when the user does NOT say " و " between them, whenever a new
-     * `<number> + <currency: تومن/تومان/هزار/میلیون>` pattern begins after a noun or payment verb
+     * `<number> + <currency: تومن/تومان/تومانش/تومنش/هزار/میلیون>` pattern begins after a noun or payment verb
      * (`دادم`, `خریدم`, `گرفتم`, `زدم`, `کردم`).
      */
     private fun splitAsyndeticAmountClauses(clause: String): List<String> {
-        val trimmed = clause.trim()
+        val trimmed = stripStumbledNumbers(clause.trim())
         if (trimmed.isBlank()) return emptyList()
 
         val numberWordsPattern = numberWordTokens.keys.sortedByDescending { it.length }.joinToString("|")
         val amountStartRegex = Regex(
-            """(?<=^|\s)(?:[۰-۹0-9][۰-۹0-9,٬،]*(?:\.[۰-۹0-9]+)?|(?:$numberWordsPattern)(?:\s+و\s+(?:$numberWordsPattern))*)\s+(?:میلیارد|میلیون|ملیون|هزار\s*تومان|هزار\s*تومن|هزار|تومان|تومن|ریال)(?=\s|$)"""
+            """(?<=^|\s)(?:[۰-۹0-9][۰-۹0-9,٬،]*(?:\.[۰-۹0-9]+)?|(?:$numberWordsPattern)(?:\s+و\s+(?:$numberWordsPattern))*)\s+(?:میلیارد|میلیون|ملیون|هزار\s*تومانش|هزار\s*تومنش|هزار\s*تومان|هزار\s*تومن|هزارش|هزار|تومانش|تومنش|تومان|تومن|ریالش|ریال)(?=\s|$)"""
         )
 
         val matches = amountStartRegex.findAll(trimmed).toList()
@@ -1602,7 +1736,7 @@ object PersianVoiceSlangParserEngine {
             }
 
             val precedingParsed = parseSingleVoiceClause(precedingSegment, null, "نقدی / دستی")
-            val hasExplicitVerb = Regex("""(?<=^|\s)(?:دادم|خریدم|گرفتم|زدم|کردم|بدم)(?=\s|$)""")
+            val hasExplicitVerb = Regex("""(?<=^|\s)(?:دادم|خریدم|گرفتم|زدم|کردم|بدم|بود)(?=\s|$)""")
                 .containsMatchIn(precedingSegment)
 
             if (precedingParsed.totalAmountToman > 0L &&
@@ -1621,10 +1755,23 @@ object PersianVoiceSlangParserEngine {
     }
 
     private fun extractCandidateSubClauses(cleaned: String): List<String> {
-        val normalized = stripMentalMathChains(cleaned)
-        val byConjOrComma = normalized
+        val selfCorrected = resolveMidSpeechSelfCorrections(cleaned)
+        val normalized = stripMentalMathChains(selfCorrected)
+
+        // Protect " و " inside compound Persian numbers (e.g. "سی و نه", "بیست و پنج", "یک میلیون و دویست")
+        val prefixPattern = compoundMoneyPrefixWords.sortedByDescending { it.length }.joinToString("|")
+        val numWordsPattern = (numberWordTokens.keys + setOf("نیم")).sortedByDescending { it.length }.joinToString("|")
+        val compoundVavRegex = Regex("""(?<=^|\s)($prefixPattern)\s+و\s+(?=($numWordsPattern)(?=\s|$))""")
+        var protectedCompoundNums = normalized
+        while (compoundVavRegex.containsMatchIn(protectedCompoundNums)) {
+            protectedCompoundNums = compoundVavRegex.replace(protectedCompoundNums) { m ->
+                "${m.groupValues[1]}⟪NUMVAV⟫"
+            }
+        }
+
+        val byConjOrComma = protectedCompoundNums
             .split(Regex("""(?:\s+و\s+|،)"""))
-            .map { it.trim() }
+            .map { resolveMidSpeechSelfCorrections(it.replace("⟪NUMVAV⟫", " و ").trim()) }
             .filter { it.isNotBlank() }
 
         val afterAsyndetic = mutableListOf<String>()
@@ -1656,12 +1803,134 @@ object PersianVoiceSlangParserEngine {
         }
     }
 
+    private fun normalizeComparableNoun(title: String): String {
+        return PersianNumberUtils.normalizePersianText(title)
+            .replace("نونوایی", "نانوایی")
+            .replace("نون", "نان")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+    }
+
+    /**
+     * Reconciles sub-thousand Toman amounts (e.g. "۵۰۰ تومانش بابت کاغذ" on a 49,500 SMS, or "۲۱۸ تومن بابت کارمزد" on a 107,218 SMS)
+     * where the user spoke a number in 1..999 without "هزار" that represents literal Tomans rather than thousands of Tomans.
+     */
+    private fun reconcileSubThousandMultiItems(
+        items: List<ParsedVoiceExpense>,
+        clauses: List<String>,
+        fallbackTotalToman: Long?
+    ): List<ParsedVoiceExpense> {
+        if (items.size < 2) return items
+
+        val canDemoteToSubThousand = items.mapIndexed { idx, item ->
+            val clause = clauses.getOrNull(idx).orEmpty()
+            val hasExplicitHezar = Regex("""(?<=^|\s)(?:هزارش|هزار|میلیون|ملیون|میلیارد)(?=\s|$)""").containsMatchIn(clause)
+            !hasExplicitHezar && item.totalAmountToman in 1_000L..999_000L && (item.totalAmountToman % 1_000L == 0L)
+        }
+
+        // 1. If we have a known target total (from bank SMS or summary intro header), check if demoting any candidate items
+        //    from N*1000 to literal N makes the total match (or fixes an item that alone exceeds fallbackTotalToman).
+        if (fallbackTotalToman != null && fallbackTotalToman > 0L) {
+            val currentSum = items.sumOf { it.totalAmountToman }
+            if (currentSum != fallbackTotalToman) {
+                // Try demoting individual items or any combination of demotable items to match fallbackTotalToman
+                for (i in items.indices) {
+                    if (canDemoteToSubThousand[i]) {
+                        val literalToman = items[i].totalAmountToman / 1_000L
+                        val candidateSum = currentSum - items[i].totalAmountToman + literalToman
+                        if (candidateSum == fallbackTotalToman ||
+                            (items[i].totalAmountToman > fallbackTotalToman && literalToman < fallbackTotalToman)
+                        ) {
+                            return items.mapIndexed { idx, it ->
+                                if (idx == i) it.copy(totalAmountToman = literalToman, userShareToman = literalToman) else it
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Even without a bank SMS fallback, if an item is a bank transfer fee ("کارمزد") with a raw number 100..999
+        //    (without "هزار") alongside a main transfer item >= 10,000 Tomans, treat the fee as literal Tomans (e.g. 218 Tomans).
+        val hasMajorTransferItem = items.any { it.totalAmountToman >= 10_000L && !it.purposeCategory.contains("کارمزد") }
+        if (hasMajorTransferItem) {
+            return items.mapIndexed { idx, item ->
+                val literalToman = item.totalAmountToman / 1_000L
+                if (canDemoteToSubThousand[idx] && item.purposeCategory.contains("کارمزد") && literalToman in 100L..999L) {
+                    item.copy(totalAmountToman = literalToman, userShareToman = literalToman)
+                } else {
+                    item
+                }
+            }
+        }
+
+        return items
+    }
+
+    /**
+     * Collapses consecutive items that have the exact same normalized item title when spoken as a self-correction
+     * (e.g. "۵۰ تومان نانوایی ۳۵ تومن نانوایی" -> keeps only the second item: "نانوایی" with 35,000 Tomans).
+     */
+    private fun collapseConsecutiveSameNounCorrections(items: List<ParsedVoiceExpense>): List<ParsedVoiceExpense> {
+        if (items.size <= 1) return items
+        val collapsed = mutableListOf<ParsedVoiceExpense>()
+        for (item in items) {
+            val prev = collapsed.lastOrNull()
+            if (prev != null &&
+                prev.purposeCategory.isNotBlank() &&
+                normalizeComparableNoun(prev.purposeCategory) == normalizeComparableNoun(item.purposeCategory)
+            ) {
+                collapsed[collapsed.lastIndex] = item
+            } else {
+                collapsed.add(item)
+            }
+        }
+        return collapsed
+    }
+
+    /**
+     * Detects if the user explicitly spoke an amount (or multiple item amounts) that conflicts with the
+     * target bank SMS amount (`fallbackTotalToman`).
+     * Returns the conflicting spoken amount in Tomans if there is a mismatch, or `null` if it matches or no amount was spoken.
+     */
+    fun detectBankSmsAmountMismatch(
+        rawSpeech: String,
+        fallbackTotalToman: Long,
+        multiItems: List<ParsedVoiceExpense> = emptyList()
+    ): Long? {
+        if (fallbackTotalToman <= 0L) return null
+        val cleaned = PersianNumberUtils.normalizePersianText(rawSpeech.trim())
+        if (cleaned.isBlank()) return null
+
+        val itemsToCheck = if (multiItems.isNotEmpty()) {
+            multiItems
+        } else {
+            parseMultiVoiceCommands(cleaned, "نقدی / دستی", fallbackTotalToman)
+        }
+
+        if (itemsToCheck.size > 1) {
+            val sumSpoken = itemsToCheck.sumOf { it.totalAmountToman }
+            return if (sumSpoken > 0L && sumSpoken != fallbackTotalToman) sumSpoken else null
+        }
+
+        // Single-item bank SMS tagging: check if the user explicitly spoke an amount in rawSpeech
+        val freeParsedItems = parseMultiVoiceCommands(cleaned, "نقدی / دستی", fallbackTotalToman = null)
+        val spokenAmount = freeParsedItems.sumOf { it.totalAmountToman }
+        if (spokenAmount <= 0L) return null
+
+        // Allow exact match or sub-thousand match (e.g. 500 spoken as 500 on a 500 Toman SMS)
+        if (spokenAmount == fallbackTotalToman) return null
+        if (spokenAmount in 1_000L..999_000L && (spokenAmount / 1_000L) == fallbackTotalToman) return null
+
+        return spokenAmount
+    }
+
     fun parseMultiVoiceCommands(
         rawSpeech: String,
         defaultBankName: String = "نقدی / دستی",
         fallbackTotalToman: Long? = null
     ): List<ParsedVoiceExpense> {
-        val rawCleaned = PersianNumberUtils.normalizePersianText(rawSpeech.trim())
+        val rawCleaned = stripStumbledNumbers(PersianNumberUtils.normalizePersianText(rawSpeech.trim()))
         if (rawCleaned.isBlank()) return emptyList()
 
         if (rawCleaned.contains("که") && (rawCleaned.contains("دنگ") || rawCleaned.contains("دُنگ") || rawCleaned.contains("سهم"))) {
@@ -1671,49 +1940,121 @@ object PersianVoiceSlangParserEngine {
 
         val cleaned = pivotNarrativeIntroKeepingAmount(rawCleaned)
         val rawCandidateParts = extractCandidateSubClauses(cleaned)
-        // Rule B: Drop any negated or cancelled clause (e.g. "۵۵ تومن میخواستم بدم نونوایی ولی ندادم")
-        val candidateParts = rawCandidateParts.filterNot { isNegatedOrCancelledClause(it) }
 
-        if (candidateParts.isEmpty()) {
+        // Rule B: Drop any negated or cancelled clause (e.g. "۵۵ تومن میخواستم بدم نونوایی ولی ندادم"),
+        // while carrying forward the item noun from a soft-cancelled "می‌خواستم X بدم ولی" clause if the next clause omits the noun!
+        val candidateParts = mutableListOf<String>()
+        var pendingSubjectFromSoftCancelled = ""
+
+        for (rawPart in rawCandidateParts) {
+            if (isNegatedOrCancelledClause(rawPart)) {
+                if (!hasHardNegationMarker(rawPart)) {
+                    val subject = extractSubjectFromSoftCancelledClause(rawPart)
+                    if (subject.isNotBlank()) {
+                        pendingSubjectFromSoftCancelled = subject
+                    }
+                } else {
+                    pendingSubjectFromSoftCancelled = ""
+                }
+            } else {
+                var effectivePart = rawPart
+                if (pendingSubjectFromSoftCancelled.isNotBlank()) {
+                    val probe = parseSingleVoiceClause(rawPart, null, defaultBankName)
+                    if (probe.purposeCategory.isBlank() && probe.totalAmountToman > 0L) {
+                        effectivePart = "$pendingSubjectFromSoftCancelled $rawPart"
+                    }
+                    pendingSubjectFromSoftCancelled = ""
+                }
+                candidateParts.add(effectivePart)
+            }
+        }
+
+        val nonEmptyCandidateParts = candidateParts.filter { part ->
+            val p = parseSingleVoiceClause(part, null, defaultBankName)
+            p.totalAmountToman > 0L || p.purposeCategory.isNotBlank()
+        }
+
+        if (nonEmptyCandidateParts.isEmpty()) {
             return emptyList()
         }
-        if (candidateParts.size == 1) {
-            return listOf(parseSingleVoiceClause(candidateParts.first(), fallbackTotalToman, defaultBankName))
+
+        // Check if the first clause is a Summary Intro Header (e.g. "اومدم کلاً ۵۰ هزار تومان خرج کردم")
+        // followed by itemized sub-clauses ("۲۵ تومن بستنی", "۲۵ تومن دمپایی").
+        // Must contain an explicit summary/spending marker so compound numbers like "یک میلیون و دویست هزار تومان خرید گوشت" are preserved!
+        val summaryHeaderRegex = Regex(
+            """(?<=^|\s)(?:کلاً|کلا|جمعاً|جمعا|مجموعاً|مجموعا|سرجمع|خرج\s+کردم|خرید\s+کردم|پول\s+دادم|کارت\s+کشیدم|پرداخت\s+کردم)(?=\s|$)"""
+        )
+        var summaryHeaderAmount: Long? = null
+        val activeCandidateParts = if (nonEmptyCandidateParts.size >= 2) {
+            val firstRaw = nonEmptyCandidateParts.first()
+            val firstProbe = parseSingleVoiceClause(firstRaw, null, defaultBankName)
+            val isSummaryHeaderClause = summaryHeaderRegex.containsMatchIn(firstRaw)
+            val restHaveItemWithAmount = nonEmptyCandidateParts.drop(1).any { part ->
+                val p = parseSingleVoiceClause(part, null, defaultBankName)
+                p.totalAmountToman > 0L && p.purposeCategory.isNotBlank()
+            }
+            if (isSummaryHeaderClause &&
+                firstProbe.totalAmountToman > 0L &&
+                firstProbe.purposeCategory.isBlank() &&
+                restHaveItemWithAmount
+            ) {
+                summaryHeaderAmount = firstProbe.totalAmountToman
+                nonEmptyCandidateParts.drop(1)
+            } else {
+                nonEmptyCandidateParts
+            }
+        } else {
+            nonEmptyCandidateParts
         }
 
-        // Case A: Tagging an existing bank transaction with known total (e.g. 100,000 Tomans)
-        if (fallbackTotalToman != null && fallbackTotalToman > 0L && candidateParts.size == 2) {
-            val firstParsed = parseSingleVoiceClause(candidateParts[0], null, defaultBankName)
-            val secondParsed = parseSingleVoiceClause(candidateParts[1], null, defaultBankName)
+        val effectiveFallbackTotal = fallbackTotalToman ?: summaryHeaderAmount
+
+        if (activeCandidateParts.size == 1) {
+            return listOf(parseSingleVoiceClause(activeCandidateParts.first(), fallbackTotalToman, defaultBankName))
+        }
+
+        // Case A: Tagging an existing bank transaction (or summary total) with known total (e.g. 100,000 or 49,500 Tomans)
+        if (effectiveFallbackTotal != null && effectiveFallbackTotal > 0L && activeCandidateParts.size == 2) {
+            val firstParsed = parseSingleVoiceClause(activeCandidateParts[0], null, defaultBankName)
+            val secondParsed = parseSingleVoiceClause(activeCandidateParts[1], null, defaultBankName)
 
             if (firstParsed.purposeCategory.isNotBlank() && secondParsed.purposeCategory.isNotBlank()) {
                 if (firstParsed.totalAmountToman == 0L &&
-                    secondParsed.totalAmountToman in 1L until fallbackTotalToman
+                    secondParsed.totalAmountToman in 1L until effectiveFallbackTotal
                 ) {
-                    val remainder = (fallbackTotalToman - secondParsed.totalAmountToman).coerceAtLeast(0L)
-                    return listOf(
-                        firstParsed.copy(totalAmountToman = remainder, userShareToman = remainder),
-                        secondParsed
+                    val remainder = (effectiveFallbackTotal - secondParsed.totalAmountToman).coerceAtLeast(0L)
+                    return collapseConsecutiveSameNounCorrections(
+                        listOf(
+                            firstParsed.copy(totalAmountToman = remainder, userShareToman = remainder),
+                            secondParsed
+                        )
                     )
                 } else if (secondParsed.totalAmountToman == 0L &&
-                    firstParsed.totalAmountToman in 1L until fallbackTotalToman
+                    firstParsed.totalAmountToman in 1L until effectiveFallbackTotal
                 ) {
-                    val remainder = (fallbackTotalToman - firstParsed.totalAmountToman).coerceAtLeast(0L)
-                    return listOf(
-                        firstParsed,
-                        secondParsed.copy(totalAmountToman = remainder, userShareToman = remainder)
+                    val remainder = (effectiveFallbackTotal - firstParsed.totalAmountToman).coerceAtLeast(0L)
+                    return collapseConsecutiveSameNounCorrections(
+                        listOf(
+                            firstParsed,
+                            secondParsed.copy(totalAmountToman = remainder, userShareToman = remainder)
+                        )
                     )
                 } else if (firstParsed.totalAmountToman > 0L && secondParsed.totalAmountToman > 0L) {
-                    return listOf(firstParsed, secondParsed)
+                    val reconciled = reconcileSubThousandMultiItems(
+                        items = listOf(firstParsed, secondParsed),
+                        clauses = activeCandidateParts,
+                        fallbackTotalToman = effectiveFallbackTotal
+                    )
+                    return collapseConsecutiveSameNounCorrections(reconciled)
                 }
             }
         }
 
-        // Case B: Multi-clause sentence where both sides have explicit stated amounts > 0L
+        // Case B: Multi-clause sentence where sub-clauses have explicit stated amounts > 0L
         val mergedClauses = mutableListOf<String>()
-        var currentClause = candidateParts.first()
+        var currentClause = activeCandidateParts.first()
 
-        for (nextPart in candidateParts.drop(1)) {
+        for (nextPart in activeCandidateParts.drop(1)) {
             val currentParsed = parseSingleVoiceClause(currentClause, null, defaultBankName)
             val nextAmount = parseSpokenPersianAmountToman(nextPart)
 
@@ -1730,16 +2071,27 @@ object PersianVoiceSlangParserEngine {
         mergedClauses.add(currentClause)
 
         if (mergedClauses.size >= 2) {
-            val parsedItems = mergedClauses.map { clause ->
-                parseSingleVoiceClause(clause, null, defaultBankName)
-            }.filter { it.totalAmountToman > 0L && it.purposeCategory.isNotBlank() }
+            val validClauses = mutableListOf<String>()
+            val parsedItems = mutableListOf<ParsedVoiceExpense>()
+            for (clause in mergedClauses) {
+                val parsed = parseSingleVoiceClause(clause, null, defaultBankName)
+                if (parsed.totalAmountToman > 0L && parsed.purposeCategory.isNotBlank()) {
+                    validClauses.add(clause)
+                    parsedItems.add(parsed)
+                }
+            }
 
             if (parsedItems.size >= 2) {
-                return parsedItems
+                val reconciled = reconcileSubThousandMultiItems(
+                    items = parsedItems,
+                    clauses = validClauses,
+                    fallbackTotalToman = effectiveFallbackTotal
+                )
+                return collapseConsecutiveSameNounCorrections(reconciled)
             }
         }
 
-        val combinedKept = candidateParts.joinToString(" و ")
+        val combinedKept = activeCandidateParts.joinToString(" و ")
         return listOf(parseSingleVoiceClause(combinedKept, fallbackTotalToman, defaultBankName))
     }
 
@@ -1787,7 +2139,18 @@ object PersianVoiceSlangParserEngine {
         }
 
         if (multiItems.size == 1) {
-            return multiItems.first()
+            val single = multiItems.first()
+            return if (isTaggingExistingSms) {
+                val effectiveBank = defaultBankName.ifBlank { "بلو" }
+                single.copy(
+                    totalAmountToman = fallbackTotalToman!!,
+                    userShareToman = (fallbackTotalToman - single.dongAmountToman).coerceAtLeast(0L),
+                    storeName = effectiveBank,
+                    cardLabel = "کارت $effectiveBank"
+                )
+            } else {
+                single
+            }
         }
 
         if (isNegatedOrCancelledClause(cleaned)) {
@@ -1823,7 +2186,7 @@ object PersianVoiceSlangParserEngine {
         fallbackTotalToman: Long? = null,
         defaultBankName: String = "نقدی / دستی"
     ): ParsedVoiceExpense {
-        val cleaned = PersianNumberUtils.normalizePersianText(rawSpeech.trim())
+        val cleaned = stripStumbledNumbers(PersianNumberUtils.normalizePersianText(rawSpeech.trim()))
         val isTaggingExistingSms = fallbackTotalToman != null && fallbackTotalToman > 0L
 
         val speechBeforeDong = if (cleaned.contains("که") && (cleaned.contains("دنگ") || cleaned.contains("دُنگ") || cleaned.contains("سهم"))) {
@@ -1884,19 +2247,19 @@ object PersianVoiceSlangParserEngine {
         exactPhraseAmounts.forEach { (phrase, _) ->
             corePhrase = corePhrase.replace(phrase, " ")
         }
-        // Strip numeric digits (outside ⟪QTY...⟫ placeholders) + optional commas + optional هزار/میلیون + optional تومان/تومن
+        // Strip numeric digits (outside ⟪QTY...⟫ placeholders) + optional commas + optional هزار/میلیون + optional تومان/تومن/تومانش/تومنش
         corePhrase = corePhrase.replace(
-            Regex("""[۰-۹0-9][۰-۹0-9,٬،]*\s*(?:میلیارد|میلیون|ملیون|هزار)?\s*(?:تومان|تومن|ریال)?"""),
+            Regex("""[۰-۹0-9][۰-۹0-9,٬،]*\s*(?:میلیارد|میلیون|ملیون|هزارش|هزار)?\s*(?:تومانش|تومنش|تومان|تومن|ریالش|ریال)?"""),
             " "
         )
-        // Strip spoken number words followed by هزار/میلیون/تومن/تومان
+        // Strip spoken number words followed by هزار/میلیون/تومن/تومان/تومانش/تومنش
         val numberWordsPattern = numberWordTokens.keys.sortedByDescending { it.length }.joinToString("|")
         corePhrase = corePhrase.replace(
-            Regex("""(?<=^|\s)(?:(?:$numberWordsPattern)(?:\s+و\s+(?:$numberWordsPattern))*)\s*(?:میلیارد|میلیون|ملیون|هزار)?\s*(?:تومان|تومن|ریال)(?=\s|$)"""),
+            Regex("""(?<=^|\s)(?:(?:$numberWordsPattern)(?:\s+و\s+(?:$numberWordsPattern))*)\s*(?:میلیارد|میلیون|ملیون|هزارش|هزار)?\s*(?:تومانش|تومنش|تومان|تومن|ریالش|ریال)(?=\s|$)"""),
             " "
         )
         corePhrase = corePhrase.replace(
-            Regex("""(?<=^|\s)(?:(?:$numberWordsPattern)(?:\s+و\s+(?:$numberWordsPattern))*)\s+(?:میلیارد|میلیون|ملیون|هزار)(?=\s|$)"""),
+            Regex("""(?<=^|\s)(?:(?:$numberWordsPattern)(?:\s+و\s+(?:$numberWordsPattern))*)\s+(?:میلیارد|میلیون|ملیون|هزارش|هزار)(?=\s|$)"""),
             " "
         )
 

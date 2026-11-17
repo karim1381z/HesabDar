@@ -49,7 +49,9 @@ data class VoiceUiState(
     val dongFriendName: String = "",
     val userShareToman: Long = 0L,
     val targetUntaggedTransaction: TransactionEntity? = null,
-    val parsedMultiItems: List<ParsedVoiceExpense> = emptyList()
+    val parsedMultiItems: List<ParsedVoiceExpense> = emptyList(),
+    val hasBankAmountMismatch: Boolean = false,
+    val conflictingSpokenAmountToman: Long = 0L
 )
 
 data class OrosiUiState(
@@ -468,17 +470,25 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
         )
         val targetTx = _voiceState.value.targetUntaggedTransaction
         val combinedNote = PersianVoiceSlangParserEngine.formatCombinedMultiVoiceNote(currentList)
+        val multiSum = currentList.sumOf { it.totalAmountToman }
         val newTotal = if (targetTx != null) {
             targetTx.totalAmountToman
         } else {
-            currentList.sumOf { it.totalAmountToman }
+            multiSum
+        }
+        val mismatchAmount = if (targetTx != null && multiSum != targetTx.totalAmountToman) {
+            multiSum
+        } else {
+            null
         }
         _voiceState.value = _voiceState.value.copy(
             parsedMultiItems = currentList,
             purposeCategory = combinedNote,
             totalAmountToman = newTotal,
             userShareToman = newTotal,
-            manualAmountText = PersianNumberUtils.formatToman(newTotal)
+            manualAmountText = PersianNumberUtils.formatToman(newTotal),
+            hasBankAmountMismatch = mismatchAmount != null,
+            conflictingSpokenAmountToman = mismatchAmount ?: 0L
         )
     }
 
@@ -511,6 +521,16 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
         val safeDong = parsed.dongAmountToman.coerceIn(0L, effectiveTotal)
         val effectiveUserShare = (effectiveTotal - safeDong).coerceAtLeast(0L)
 
+        val mismatchAmount = if (targetTx != null) {
+            PersianVoiceSlangParserEngine.detectBankSmsAmountMismatch(
+                rawSpeech = speech,
+                fallbackTotalToman = targetTx.totalAmountToman,
+                multiItems = multiItems
+            )
+        } else {
+            null
+        }
+
         _voiceState.value = _voiceState.value.copy(
             recognizedText = speech,
             manualAmountText = effectiveManualText,
@@ -522,7 +542,9 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
             dongFriendName = parsed.dongFriendName,
             userShareToman = effectiveUserShare,
             targetUntaggedTransaction = targetTx,
-            parsedMultiItems = if (multiItems.size > 1) multiItems else emptyList()
+            parsedMultiItems = if (multiItems.size > 1) multiItems else emptyList(),
+            hasBankAmountMismatch = mismatchAmount != null,
+            conflictingSpokenAmountToman = mismatchAmount ?: 0L
         )
     }
 
@@ -554,6 +576,13 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val v = _voiceState.value
             val targetTx = v.targetUntaggedTransaction
+
+            if (targetTx != null && v.hasBankAmountMismatch) {
+                val spokenFmt = PersianNumberUtils.formatToman(v.conflictingSpokenAmountToman, true)
+                val bankFmt = PersianNumberUtils.formatToman(targetTx.totalAmountToman, true)
+                showBanner("مبلغ گفته‌شده ($spokenFmt) با مبلغ پیامک بانک ($bankFmt) مطابقت ندارد. لطفاً اصلاح کنید.")
+                return@launch
+            }
 
             // Check if user has multi-clause items (including any inline edits made in the Voice Sheet)
             val activeMultiItems = if (v.parsedMultiItems.size > 1) {

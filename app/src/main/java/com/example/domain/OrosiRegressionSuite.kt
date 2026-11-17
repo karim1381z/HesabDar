@@ -312,6 +312,195 @@ object OrosiRegressionSuite {
             ok to "۱,۰۰۰ تبدیل در ${PersianNumberUtils.toPersianDigits(elapsedMs.toString())} میلی‌ثانیه ($lastDate)"
         }
 
+        // 16. Video 55batch (00:05): Summary intro total before itemized breakdown
+        recordTest(
+            category = "تست استرس صوتی (ویدیو ۵۵)",
+            title = "حذف مبلغ سرجمع مقدمه («کلاً ۵۰ هزار تومان خرج کردم») قبل از ریز اقلام",
+            inputSummary = "رفتم بیرون و اومدم کلاً ۵۰ هزار تومان خرج کردم ۲۵ تومن بستنی ۲۵ تومن دمپایی",
+            expectedSummary = "بستنی (۲۵,۰۰۰) + دمپایی (۲۵,۰۰۰) • جمع: ۵۰,۰۰۰ تومان"
+        ) {
+            val items = PersianVoiceSlangParserEngine.parseMultiVoiceCommands(
+                "رفتم بیرون و اومدم کلاً ۵۰ هزار تومان خرج کردم ۲۵ تومن بستنی ۲۵ تومن دمپایی"
+            )
+            val sum = items.sumOf { it.totalAmountToman }
+            val ok = items.size == 2 &&
+                items[0].purposeCategory == "بستنی" && items[0].totalAmountToman == 25_000L &&
+                items[1].purposeCategory == "دمپایی" && items[1].totalAmountToman == 25_000L &&
+                sum == 50_000L
+            val actual = items.joinToString(" + ") {
+                "${it.purposeCategory} (${PersianNumberUtils.formatToman(it.totalAmountToman)})"
+            } + " • جمع: ${PersianNumberUtils.formatToman(sum, true)}"
+            ok to actual
+        }
+
+        // 17. Video 55batch (00:41): Suffix "تومانش" + sub-thousand 500 Toman remainder on 49,500 Toman bank SMS
+        recordTest(
+            category = "تست استرس تگ پیامک (ویدیو ۵۵)",
+            title = "حذف پسوند «تومانش» و تشخیص عدد خرد ۵۰۰ تومان روی پیامک ۴۹,۵۰۰ تومانی",
+            inputSummary = "۴۹ تومانش بابت بستنی ۵۰۰ تومانش بابت کاغذ (بانک: ۴۹,۵۰۰ تومان)",
+            expectedSummary = "بستنی (۴۹,۰۰۰) + کاغذ (۵۰۰)"
+        ) {
+            val items = PersianVoiceSlangParserEngine.parseMultiVoiceCommands(
+                rawSpeech = "۴۹ تومانش بابت بستنی ۵۰۰ تومانش بابت کاغذ",
+                defaultBankName = "بلو",
+                fallbackTotalToman = 49_500L
+            )
+            val combined = PersianVoiceSlangParserEngine.formatCombinedMultiVoiceNote(items)
+            val mismatch = PersianVoiceSlangParserEngine.detectBankSmsAmountMismatch(
+                rawSpeech = "۴۹ تومانش بابت بستنی ۵۰۰ تومانش بابت کاغذ",
+                fallbackTotalToman = 49_500L,
+                multiItems = items
+            )
+            val ok = items.size == 2 &&
+                items[0].purposeCategory == "بستنی" && items[0].totalAmountToman == 49_000L &&
+                items[1].purposeCategory == "کاغذ" && items[1].totalAmountToman == 500L &&
+                combined == "بستنی (۴۹,۰۰۰) + کاغذ (۵۰۰)" &&
+                mismatch == null
+            ok to combined
+        }
+
+        // 18. Video 55batch (00:58): Conflicting spoken amount on bank SMS ("۸۵ تومن بابت بستنی" on 80,000 Toman SMS)
+        recordTest(
+            category = "هشدار مغایرت مبلغ بانک (ویدیو ۵۵)",
+            title = "تشخیص مغایرت مبلغ گفته‌شده (۸۵,۰۰۰) با مبلغ پیامک بانک (۸۰,۰۰۰)",
+            inputSummary = "۸۵ تومن بابت بستنی (روی پیامک ۸۰,۰۰۰ تومانی بلوبانک)",
+            expectedSummary = "هشدار عدم تطابق فعال (۸۵,۰۰۰ ≠ ۸۰,۰۰۰)"
+        ) {
+            val conflictAmount = PersianVoiceSlangParserEngine.detectBankSmsAmountMismatch(
+                rawSpeech = "۸۵ تومن بابت بستنی",
+                fallbackTotalToman = 80_000L
+            )
+            val noConflictWhenMatching = PersianVoiceSlangParserEngine.detectBankSmsAmountMismatch(
+                rawSpeech = "۸۰ تومن بابت بستنی",
+                fallbackTotalToman = 80_000L
+            )
+            val noConflictWhenNoAmountSpoken = PersianVoiceSlangParserEngine.detectBankSmsAmountMismatch(
+                rawSpeech = "بستنی",
+                fallbackTotalToman = 80_000L
+            )
+            val ok = conflictAmount == 85_000L &&
+                noConflictWhenMatching == null &&
+                noConflictWhenNoAmountSpoken == null
+            ok to "مبلغ متناقض تشخیص داده شد: ${PersianNumberUtils.formatToman(conflictAmount ?: 0L, true)} ≠ ۸۰,۰۰۰ تومان"
+        }
+
+        // 19. Video 55batch (01:13): Stumbled number correction ("۲۱۷ ۲۱۸ تومن") + 218 Toman bank fee on 107,218 Toman SMS
+        recordTest(
+            category = "تست استرس تگ پیامک (ویدیو ۵۵)",
+            title = "اصلاح تپق عددی «۲۱۷ ۲۱۸ تومن» و تشخیص کارمزد خرد ۲۱۸ تومان روی پیامک ۱۰۷,۲۱۸ تومانی",
+            inputSummary = "۱۰۷ تومن بابت انتقال پول و ۲۱۷ ۲۱۸ تومن بابت کارمزد (بانک: ۱۰۷,۲۱۸)",
+            expectedSummary = "انتقال پول (۱۰۷,۰۰۰) + کارمزد (۲۱۸)"
+        ) {
+            val items = PersianVoiceSlangParserEngine.parseMultiVoiceCommands(
+                rawSpeech = "۱۰۷ تومن بابت انتقال پول و ۲۱۷ ۲۱۸ تومن بابت کارمزد",
+                defaultBankName = "بلو",
+                fallbackTotalToman = 107_218L
+            )
+            val combined = PersianVoiceSlangParserEngine.formatCombinedMultiVoiceNote(items)
+            val mismatch = PersianVoiceSlangParserEngine.detectBankSmsAmountMismatch(
+                rawSpeech = "۱۰۷ تومن بابت انتقال پول و ۲۱۷ ۲۱۸ تومن بابت کارمزد",
+                fallbackTotalToman = 107_218L,
+                multiItems = items
+            )
+            val ok = items.size == 2 &&
+                items[0].purposeCategory == "انتقال پول" && items[0].totalAmountToman == 107_000L &&
+                items[1].purposeCategory == "کارمزد" && items[1].totalAmountToman == 218L &&
+                mismatch == null
+            ok to combined
+        }
+
+        // 20. Video 55batch_10 (00:08): Preserving item noun across "می‌خواستم ۳۹ تومن بدم ولی ۴۹ تومن دادم"
+        recordTest(
+            category = "تست استرس صوتی (ویدیو ۵۵_۱۰)",
+            title = "حفظ عنوان «۲ تا بستنی» هنگام اصلاح قیمت («می‌خواستم ۳۹ تومن بدم ولی ۴۹ تومن دادم»)",
+            inputSummary = "سلام رفتم بیرون اومدم بعد یادمه که برای دوتا بستنی می‌خواستم ۳۹ تومن بدم ولی ۴۹ تومن دادم",
+            expectedSummary = "۲ تا بستنی • ۴۹,۰۰۰ تومان"
+        ) {
+            val parsed = PersianVoiceSlangParserEngine.parseVoiceCommand(
+                "سلام رفتم بیرون اومدم بعد یادمه که برای دوتا بستنی می‌خواستم ۳۹ تومن بدم ولی ۴۹ تومن دادم"
+            )
+            val ok = parsed.purposeCategory == "۲ تا بستنی" && parsed.totalAmountToman == 49_000L
+            ok to "${parsed.purposeCategory} • ${PersianNumberUtils.formatToman(parsed.totalAmountToman, true)}"
+        }
+
+        // 21. Video 55batch_10 (00:35): Mid-speech self-correction with "نه نه نه نه"
+        recordTest(
+            category = "تست استرس صوتی (ویدیو ۵۵_۱۰)",
+            title = "اصلاح آنی مبلغ در حین صحبت با «نه نه نه نه» (جایگزینی ۵۰ با ۳۵ هزار تومان)",
+            inputSummary = "۵۰ تومن نانوایی نه نه نه نه ۳۵ تومن نانوایی",
+            expectedSummary = "نانوایی • ۳۵,۰۰۰ تومان (۱ تراکنش)"
+        ) {
+            val items = PersianVoiceSlangParserEngine.parseMultiVoiceCommands(
+                "۵۰ تومن نانوایی نه نه نه نه ۳۵ تومن نانوایی"
+            )
+            val ok = items.size == 1 &&
+                items[0].purposeCategory == "نانوایی" &&
+                items[0].totalAmountToman == 35_000L
+            val actual = items.joinToString(" + ") {
+                "${it.purposeCategory} • ${PersianNumberUtils.formatToman(it.totalAmountToman, true)}"
+            } + " (${PersianNumberUtils.toPersianDigits(items.size.toString())} تراکنش)"
+            ok to actual
+        }
+
+        // 22. Video 55batch_10 (00:42): Same-noun asyndetic override ("۵۰ تومان نانوایی ۳۵ تومن نانوایی")
+        recordTest(
+            category = "تست استرس صوتی (ویدیو ۵۵_۱۰)",
+            title = "اصلاح خودکار مبلغ در صورت تکرار همان عنوان بدون «و» («۵۰ تومان نانوایی ۳۵ تومن نانوایی»)",
+            inputSummary = "۵۰ تومان نانوایی ۳۵ تومن نانوایی",
+            expectedSummary = "نانوایی • ۳۵,۰۰۰ تومان (۱ تراکنش)"
+        ) {
+            val items = PersianVoiceSlangParserEngine.parseMultiVoiceCommands(
+                "۵۰ تومان نانوایی ۳۵ تومن نانوایی"
+            )
+            val single = PersianVoiceSlangParserEngine.parseVoiceCommand(
+                "۵۰ تومان نانوایی ۳۵ تومن نانوایی"
+            )
+            val ok = items.size == 1 &&
+                items[0].purposeCategory == "نانوایی" &&
+                items[0].totalAmountToman == 35_000L &&
+                single.purposeCategory == "نانوایی" &&
+                single.totalAmountToman == 35_000L
+            ok to "${single.purposeCategory} • ${PersianNumberUtils.formatToman(single.totalAmountToman, true)} (${PersianNumberUtils.toPersianDigits(items.size.toString())} تراکنش)"
+        }
+
+        // 23. Video 55batch_10 (00:58): Self-correction with "بود نه نه نه نه ... بود"
+        recordTest(
+            category = "تست استرس صوتی (ویدیو ۵۵_۱۰)",
+            title = "اصلاح مبلغ همراه با فعل ربطی «بود» («۵۰ تومن نانوایی بود نه نه نه نه ۳۵ تومن بود نانوایی»)",
+            inputSummary = "۵۰ تومن نانوایی بود نه نه نه نه ۳۵ تومن بود نانوایی",
+            expectedSummary = "نانوایی • ۳۵,۰۰۰ تومان"
+        ) {
+            val parsed = PersianVoiceSlangParserEngine.parseVoiceCommand(
+                "۵۰ تومن نانوایی بود نه نه نه نه ۳۵ تومن بود نانوایی"
+            )
+            val ok = parsed.purposeCategory == "نانوایی" && parsed.totalAmountToman == 35_000L
+            ok to "${parsed.purposeCategory} • ${PersianNumberUtils.formatToman(parsed.totalAmountToman, true)}"
+        }
+
+        // 24. Video 55batch_10 (01:20): Deduplicating repeated noun around "بود" ("۵۰ تومان نانوایی بود نانوایی")
+        recordTest(
+            category = "تست استرس صوتی (ویدیو ۵۵_۱۰)",
+            title = "حذف «بود» و ادغام کلمات تکراری («۵۰ تومان نانوایی بود نانوایی» ← «نانوایی»)",
+            inputSummary = "۵۰ تومان نانوایی بود نانوایی",
+            expectedSummary = "نانوایی • ۵۰,۰۰۰ تومان"
+        ) {
+            val parsed = PersianVoiceSlangParserEngine.parseVoiceCommand("۵۰ تومان نانوایی بود نانوایی")
+            val ok = parsed.purposeCategory == "نانوایی" && parsed.totalAmountToman == 50_000L
+            ok to "${parsed.purposeCategory} • ${PersianNumberUtils.formatToman(parsed.totalAmountToman, true)}"
+        }
+
+        // 25.Preserving "نه" as the number 9 ("سی و نه تومن نونوایی" & "نه تومن آدامس") while stripping negation "نه"
+        recordTest(
+            category = "تمایز «نه» عددی (۹) از «نه» نفی",
+            title = "حفظ «نه» در اعداد مرکب («سی و نه تومن») در کنار حذف «نه» اصلاحی",
+            inputSummary = "سی و نه تومن نونوایی",
+            expectedSummary = "نونوایی • ۳۹,۰۰۰ تومان"
+        ) {
+            val parsed39 = PersianVoiceSlangParserEngine.parseVoiceCommand("سی و نه تومن نونوایی")
+            val ok = parsed39.purposeCategory == "نونوایی" && parsed39.totalAmountToman == 39_000L
+            ok to "${parsed39.purposeCategory} • ${PersianNumberUtils.formatToman(parsed39.totalAmountToman, true)}"
+        }
+
         val totalMs = ((System.nanoTime() - suiteStartNanos) / 1_000_000L).coerceAtLeast(1L)
         val passedCount = results.count { it.passed }
         val failedCount = results.size - passedCount
