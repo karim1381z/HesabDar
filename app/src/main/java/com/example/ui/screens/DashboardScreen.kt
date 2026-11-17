@@ -1,8 +1,10 @@
 package com.example.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -121,6 +123,10 @@ fun DashboardScreen(
         rawTankhahSum
     }
 
+    val visibleTransactions = androidx.compose.runtime.remember(transactions) {
+        transactions.filter { it.totalAmountToman > 0L }
+    }
+
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -129,22 +135,22 @@ fun DashboardScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         if (isSyncingSms) {
-            item {
+            item(key = "sms_sync_banner", contentType = "sync_banner") {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(20.dp))
                         .background(OrosiSurfaceHigh)
                         .border(1.dp, NishapurTurquoiseBright, RoundedCornerShape(20.dp))
-                        .padding(horizontal = 20.dp, vertical = 18.dp)
+                        .padding(horizontal = 20.dp, vertical = 14.dp)
                         .testTag("sms_sync_loading_card"),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     CircularProgressIndicator(
                         color = NishapurTurquoiseBright,
-                        strokeWidth = 3.dp,
-                        modifier = Modifier.size(26.dp)
+                        strokeWidth = 2.5.dp,
+                        modifier = Modifier.size(22.dp)
                     )
                     Text(
                         text = "در حال بازخوانی و تحلیل پیامک‌های بانکی...",
@@ -156,7 +162,7 @@ fun DashboardScreen(
         }
 
         // 1. Jibeman-Style Financial Status Hero Card ("وضعیت مالی")
-        item {
+        item(key = "hero_card", contentType = "hero_card") {
             JibemanFinancialStatusHeroCard(
                 totalAllAccountsBalance = totalAllAccountsBalance,
                 unpaidCommitmentsToman = unpaidCommitmentsToman,
@@ -165,6 +171,7 @@ fun DashboardScreen(
                 hideAmounts = settings.hideAmounts,
                 tankhahModeEnabled = settings.tankhahModeEnabled,
                 onlyTankhahMode = settings.onlyTankhahMode,
+                isSyncingSms = isSyncingSms,
                 onToggleHideAmounts = onToggleHideAmounts,
                 onSetOnlyTankhahMode = onSetOnlyTankhahMode,
                 onClick = onHeroCardClick
@@ -271,10 +278,11 @@ fun DashboardScreen(
             }
         }
 
-        // 4. Recent Transaction Cards (excluding any 0 Toman items)
+        // 4. All Recent Transaction Cards (with cached Jalali dates and contentType for 120fps scrolling)
         items(
-            items = transactions.filter { it.totalAmountToman > 0L }.take(25),
-            key = { tx -> tx.id }
+            items = visibleTransactions,
+            key = { tx -> tx.id },
+            contentType = { "transaction_card" }
         ) { tx ->
             CalmTransactionCard(
                 transaction = tx,
@@ -301,6 +309,7 @@ private fun JibemanFinancialStatusHeroCard(
     hideAmounts: Boolean,
     tankhahModeEnabled: Boolean,
     onlyTankhahMode: Boolean,
+    isSyncingSms: Boolean = false,
     onToggleHideAmounts: () -> Unit,
     onSetOnlyTankhahMode: (Boolean) -> Unit,
     onClick: () -> Unit
@@ -322,6 +331,19 @@ private fun JibemanFinancialStatusHeroCard(
     }
 
     val freeBalance = (selectedTotalBalance - unpaidCommitmentsToman).coerceAtLeast(0L)
+
+    val animatedFreeBalanceFloat by animateFloatAsState(
+        targetValue = freeBalance.toFloat(),
+        animationSpec = tween(durationMillis = 550, easing = FastOutSlowInEasing),
+        label = "animatedFreeBalance"
+    )
+    val animatedTotalBalanceFloat by animateFloatAsState(
+        targetValue = selectedTotalBalance.toFloat(),
+        animationSpec = tween(durationMillis = 550, easing = FastOutSlowInEasing),
+        label = "animatedTotalBalance"
+    )
+    val displayedFreeBalance = kotlin.math.round(animatedFreeBalanceFloat.toDouble()).toLong().coerceAtLeast(0L)
+    val displayedTotalBalance = kotlin.math.round(animatedTotalBalanceFloat.toDouble()).toLong().coerceAtLeast(0L)
 
     val denom = (selectedTotalBalance + unpaidCommitmentsToman).coerceAtLeast(1L)
     val progressRatio = if (selectedTotalBalance > 0L) {
@@ -486,7 +508,7 @@ private fun JibemanFinancialStatusHeroCard(
 
                 Text(
                     text = PersianNumberUtils.formatToman(
-                        freeBalance,
+                        displayedFreeBalance,
                         showUnit = true,
                         hideAmount = hideAmounts
                     ),
@@ -501,6 +523,28 @@ private fun JibemanFinancialStatusHeroCard(
                     softWrap = false,
                     modifier = Modifier.testTag("hero_peace_of_mind_amount")
                 )
+
+                AnimatedVisibility(visible = isSyncingSms) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(top = 6.dp)
+                    ) {
+                        LinearProgressIndicator(
+                            color = NishapurTurquoiseBright,
+                            trackColor = Color.White.copy(alpha = 0.16f),
+                            modifier = Modifier
+                                .width(140.dp)
+                                .height(3.dp)
+                                .clip(RoundedCornerShape(50))
+                        )
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            text = "در حال به‌روزرسانی مانده بانک‌ها...",
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.5.sp),
+                            color = NishapurTurquoiseSoft
+                        )
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -549,7 +593,7 @@ private fun JibemanFinancialStatusHeroCard(
                     }
                     Text(
                         text = PersianNumberUtils.formatToman(
-                            selectedTotalBalance,
+                            displayedTotalBalance,
                             showUnit = true,
                             hideAmount = hideAmounts
                         ),
@@ -725,6 +769,38 @@ fun CalmTransactionCard(
         else -> RubyRoseSoft
     }
 
+    val shortBank = androidx.compose.runtime.remember(transaction.bankName, transaction.cardInfo) {
+        transaction.shortBankName
+    }
+    val rowTitle = androidx.compose.runtime.remember(
+        transaction.isUntagged,
+        transaction.title,
+        transaction.purpose,
+        transaction.storeName,
+        shortBank
+    ) {
+        if (transaction.isUntagged) {
+            "خرید کارتی ($shortBank)"
+        } else {
+            transaction.title.ifBlank { transaction.displayTitle }
+        }
+    }
+    val subtitleText = androidx.compose.runtime.remember(transaction.timestamp, shortBank) {
+        transaction.simpleSubtitle
+    }
+    val formattedSingleLineAmount = androidx.compose.runtime.remember(
+        transaction.type,
+        transaction.userShareToman,
+        transaction.totalAmountToman,
+        hideAmounts
+    ) {
+        when (transaction.type) {
+            "INCOME" -> "+${PersianNumberUtils.formatToman(transaction.userShareToman, showUnit = true, hideAmount = hideAmounts)}"
+            "SELF_TRANSFER" -> PersianNumberUtils.formatToman(transaction.totalAmountToman, showUnit = true, hideAmount = hideAmounts)
+            else -> PersianNumberUtils.formatToman(transaction.userShareToman, showUnit = true, hideAmount = hideAmounts)
+        }
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -742,18 +818,13 @@ fun CalmTransactionCard(
     ) {
         // Official 44.dp circular Bank Logo Avatar
         com.example.ui.components.BankLogoAvatar(
-            bankName = transaction.shortBankName,
+            bankName = shortBank,
             size = 44.dp
         )
 
         Spacer(modifier = Modifier.width(12.dp))
 
         Column(modifier = Modifier.weight(1f)) {
-            val rowTitle = if (transaction.isUntagged) {
-                "خرید کارتی (${transaction.shortBankName})"
-            } else {
-                transaction.title.ifBlank { transaction.displayTitle }
-            }
             Text(
                 text = rowTitle,
                 style = MaterialTheme.typography.titleMedium.copy(
@@ -766,7 +837,7 @@ fun CalmTransactionCard(
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = transaction.simpleSubtitle,
+                text = subtitleText,
                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                 color = OrosiOnSurfaceVariant,
                 maxLines = 1,
@@ -783,12 +854,6 @@ fun CalmTransactionCard(
         }
 
         Spacer(modifier = Modifier.width(10.dp))
-
-        val formattedSingleLineAmount = when (transaction.type) {
-            "INCOME" -> "+${PersianNumberUtils.formatToman(transaction.userShareToman, showUnit = true, hideAmount = hideAmounts)}"
-            "SELF_TRANSFER" -> PersianNumberUtils.formatToman(transaction.totalAmountToman, showUnit = true, hideAmount = hideAmounts)
-            else -> PersianNumberUtils.formatToman(transaction.userShareToman, showUnit = true, hideAmount = hideAmounts)
-        }
 
         Text(
             text = formattedSingleLineAmount,

@@ -89,6 +89,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -97,7 +98,9 @@ import com.example.data.local.AppSettingsEntity
 import com.example.data.local.CommitmentEntity
 import com.example.data.local.TransactionEntity
 import com.example.domain.JalaliCalendarUtils
+import com.example.domain.OrosiRegressionSuite
 import com.example.domain.PersianNumberUtils
+import com.example.domain.RegressionSuiteReport
 import com.example.ui.VoiceUiState
 import com.example.ui.theme.AlabasterSilk
 import com.example.ui.theme.NishapurTurquoise
@@ -1573,7 +1576,7 @@ fun AddBankAccountBottomSheet(
     var accountCustomTitle by remember { mutableStateOf("") }
     var balanceField by remember { mutableStateOf(TextFieldValue("")) }
     var cardLast4 by remember { mutableStateOf("") }
-    var isTankhah by remember { mutableStateOf(true) }
+    var isTankhah by remember { mutableStateOf(false) }
     var attachedSenders by remember { mutableStateOf(listOf<String>()) }
     var showSmsSenderPickerDialog by remember { mutableStateOf(false) }
     var recentInboxMessages by remember { mutableStateOf<List<InboxSmsPickerRow>>(emptyList()) }
@@ -1707,6 +1710,7 @@ fun AddBankAccountBottomSheet(
                 )
 
                 // Horizontal scrollable selector of all 38 Iranian banks with official 192x192 PNG logos
+                // Cards are 106.dp wide with 2-line centered text so NO bank name is ever truncated with "..."
                 androidx.compose.foundation.lazy.LazyRow(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1720,8 +1724,10 @@ fun AddBankAccountBottomSheet(
                         val isSelected = selectedBankName == bankFa
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
                             modifier = Modifier
-                                .width(84.dp)
+                                .width(106.dp)
+                                .height(98.dp)
                                 .clip(RoundedCornerShape(16.dp))
                                 .background(
                                     if (isSelected) PersianLapis else OrosiSurfaceContainer
@@ -1732,7 +1738,7 @@ fun AddBankAccountBottomSheet(
                                     shape = RoundedCornerShape(16.dp)
                                 )
                                 .clickable { selectedBankName = bankFa }
-                                .padding(vertical = 10.dp, horizontal = 6.dp)
+                                .padding(vertical = 8.dp, horizontal = 6.dp)
                                 .testTag("select_bank_$bankFa")
                         ) {
                             BankLogoAvatar(
@@ -1744,11 +1750,12 @@ fun AddBankAccountBottomSheet(
                                 text = bankFa,
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium,
-                                    fontSize = 11.sp
+                                    fontSize = 11.sp,
+                                    lineHeight = 14.sp
                                 ),
                                 color = if (isSelected) AlabasterSilk else OrosiOnSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                textAlign = TextAlign.Center,
+                                maxLines = 2
                             )
                         }
                     }
@@ -1816,21 +1823,44 @@ fun AddBankAccountBottomSheet(
                         )
                         val allDisplayedSenders = (defaultSendersForSelectedBank + attachedSenders).distinct()
                         if (allDisplayedSenders.isNotEmpty()) {
-                            Text(
-                                text = allDisplayedSenders.take(2).joinToString(" ، "),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = NishapurTurquoiseSoft,
-                                maxLines = 1
-                            )
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                allDisplayedSenders.take(2).forEach { sender ->
+                                    Text(
+                                        text = PersianNumberUtils.formatLtrSender(sender),
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            textDirection = TextDirection.Ltr,
+                                            fontWeight = FontWeight.SemiBold
+                                        ),
+                                        color = NishapurTurquoiseSoft,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
                         }
                     }
 
                     if (attachedSenders.isNotEmpty()) {
-                        Text(
-                            text = "سرشماره‌های انتخاب‌شده: ${attachedSenders.joinToString(" ، ")}",
-                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
-                            color = SaffronGoldLight
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "سرشماره‌های انتخاب‌شده:",
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                color = SaffronGoldLight
+                            )
+                            Text(
+                                text = PersianNumberUtils.formatLtrSenderList(attachedSenders, "  "),
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    textDirection = TextDirection.Ltr
+                                ),
+                                color = SaffronGoldLight
+                            )
+                        }
                     }
 
                     OutlinedButton(
@@ -2037,13 +2067,27 @@ fun AddBankAccountBottomSheet(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = "سرشماره: ${smsItem.senderAddress}",
-                                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                                            color = NishapurTurquoiseSoft,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Text(
+                                                text = "سرشماره:",
+                                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                                color = NishapurTurquoiseSoft,
+                                                maxLines = 1
+                                            )
+                                            Text(
+                                                text = PersianNumberUtils.formatLtrSender(smsItem.senderAddress),
+                                                style = MaterialTheme.typography.labelLarge.copy(
+                                                    fontWeight = FontWeight.Bold,
+                                                    textDirection = TextDirection.Ltr
+                                                ),
+                                                color = NishapurTurquoiseSoft,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
                                         Text(
                                             text = smsItem.dateStr,
                                             style = MaterialTheme.typography.labelSmall,
@@ -2476,6 +2520,171 @@ fun PaydayAndBackupBottomSheet(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("بازیابی اطلاعات")
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // In-App Automated Regression & Stress Test Lab (requested in Video batch_9)
+            var regressionReport by remember { mutableStateOf<RegressionSuiteReport?>(null) }
+            var showRegressionDetails by remember { mutableStateOf(false) }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(OrosiSurfaceContainer)
+                    .border(
+                        1.dp,
+                        if (regressionReport?.allPassed == true) NishapurTurquoiseBright else OrosiHairline,
+                        RoundedCornerShape(18.dp)
+                    )
+                    .padding(14.dp)
+                    .testTag("regression_test_lab_card"),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "آزمایشگاه تست خودکار رگرسیون و استرس",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.ExtraBold),
+                            color = AlabasterSilk
+                        )
+                        Text(
+                            text = "بررسی خودکار ۱۵ سناریوی صوتی، پیامکی، تقویم و بانک‌ها بدون نیاز به تست دستی",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = OrosiOnSurfaceVariant
+                        )
+                    }
+                    regressionReport?.let { report ->
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(if (report.allPassed) NishapurTurquoiseDeep else RubyRose.copy(alpha = 0.35f))
+                                .border(
+                                    1.dp,
+                                    if (report.allPassed) NishapurTurquoiseBright else RubyRoseSoft,
+                                    RoundedCornerShape(50)
+                                )
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                                .testTag("regression_report_badge")
+                        ) {
+                            Text(
+                                text = "${PersianNumberUtils.toPersianDigits(report.passedCount.toString())}/${PersianNumberUtils.toPersianDigits(report.totalCount.toString())} موفق ✓",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.ExtraBold),
+                                color = if (report.allPassed) NishapurTurquoiseSoft else RubyRoseSoft
+                            )
+                        }
+                    }
+                }
+
+                Button(
+                    onClick = {
+                        regressionReport = OrosiRegressionSuite.runFullRegressionAndStressSuite()
+                        showRegressionDetails = true
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = NishapurTurquoiseDeep,
+                        contentColor = AlabasterSilk
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, NishapurTurquoiseBright, RoundedCornerShape(12.dp))
+                        .testTag("run_regression_suite_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.VerifiedUser,
+                        contentDescription = null,
+                        tint = NishapurTurquoiseBright,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (regressionReport == null) {
+                            "اجرای تست خودکار رگرسیون و استرس (۱۵ سناریو)"
+                        } else {
+                            "اجرای مجدد تست استرس (${PersianNumberUtils.toPersianDigits(regressionReport!!.totalDurationMs.toString())} میلی‌ثانیه)"
+                        },
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
+
+                regressionReport?.let { report ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showRegressionDetails = !showRegressionDetails }
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "نتیجه: ${PersianNumberUtils.toPersianDigits(report.passedCount.toString())} تست موفق از ${PersianNumberUtils.toPersianDigits(report.totalCount.toString())} در ${PersianNumberUtils.toPersianDigits(report.totalDurationMs.toString())} میلی‌ثانیه",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = if (report.allPassed) NishapurTurquoiseSoft else RubyRoseSoft
+                        )
+                        Icon(
+                            imageVector = if (showRegressionDetails) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = null,
+                            tint = OrosiOnSurfaceVariant
+                        )
+                    }
+
+                    AnimatedVisibility(visible = showRegressionDetails) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            report.results.forEach { tc ->
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(OrosiSurfaceHigh)
+                                        .border(
+                                            1.dp,
+                                            if (tc.passed) NishapurTurquoise.copy(alpha = 0.35f) else RubyRoseSoft,
+                                            RoundedCornerShape(10.dp)
+                                        )
+                                        .padding(10.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "${PersianNumberUtils.toPersianDigits(tc.id.toString())}. ${tc.title}",
+                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                            color = AlabasterSilk,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        Text(
+                                            text = if (tc.passed) "✓ موفق" else "✗ خطا",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.ExtraBold),
+                                            color = if (tc.passed) NishapurTurquoiseSoft else RubyRoseSoft
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "ورودی: ${tc.inputSummary}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = OrosiOnSurfaceVariant
+                                    )
+                                    Text(
+                                        text = "خروجی: ${tc.actualSummary}",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                                        color = NishapurTurquoiseSoft
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

@@ -120,6 +120,28 @@ object PersianNumberUtils {
         val formatted = DecimalFormat("#,###", symbols).format(parsed)
         return toPersianDigits(formatted)
     }
+
+    /**
+     * Wraps a phone number or SMS sender address in Unicode Left-to-Right Isolate + LTR Mark
+     * (`\u2066\u200E...\u2069`) so leading `+` signs (e.g. `+982187641`, `+989999987641`)
+     * ALWAYS render on the LEFT side even inside RTL Persian text or comma-separated lists.
+     */
+    fun formatLtrSender(raw: String): String {
+        val cleaned = raw.trim()
+            .removePrefix("\u2066")
+            .removePrefix("\u200E")
+            .removePrefix("\u202A")
+            .removeSuffix("\u2069")
+            .removeSuffix("\u202C")
+            .removeSuffix("\u200F")
+            .trim()
+        if (cleaned.isEmpty()) return ""
+        return "\u2066\u200E$cleaned\u2069"
+    }
+
+    fun formatLtrSenderList(senders: List<String>, separator: String = " ، "): String =
+        senders.mapNotNull { s -> formatLtrSender(s).takeIf { it.isNotEmpty() } }
+            .joinToString(separator)
 }
 
 data class JalaliDateTime(
@@ -131,27 +153,25 @@ data class JalaliDateTime(
     val hour: Int,
     val minute: Int
 ) {
-    val weekdayDate: String
-        get() = "$weekdayName ${PersianNumberUtils.toPersianDigits(day.toString())} $monthName"
+    private val persianDayStr: String = PersianNumberUtils.toPersianDigits(day.toString())
+    private val persianYearStr: String = PersianNumberUtils.toPersianDigits(year.toString())
 
-    val dateWithYear: String
-        get() = "${PersianNumberUtils.toPersianDigits(day.toString())} $monthName ${PersianNumberUtils.toPersianDigits(year.toString())}"
+    val weekdayDate: String = "$weekdayName $persianDayStr $monthName"
 
-    val fullWeekdayDateWithYear: String
-        get() = "$weekdayName ${PersianNumberUtils.toPersianDigits(day.toString())} $monthName ${PersianNumberUtils.toPersianDigits(year.toString())}"
+    val dateWithYear: String = "$persianDayStr $monthName $persianYearStr"
 
-    val monthYearLabel: String
-        get() = "$monthName ${PersianNumberUtils.toPersianDigits(year.toString())}"
+    val fullWeekdayDateWithYear: String = "$weekdayName $persianDayStr $monthName $persianYearStr"
 
-    val yearMonthKey: Int
-        get() = year * 100 + month
+    val monthYearLabel: String = "$monthName $persianYearStr"
 
-    val timeStr: String
-        get() = PersianNumberUtils.toPersianDigits(String.format(Locale.US, "%02d:%02d", hour, minute))
+    val yearMonthKey: Int = year * 100 + month
+
+    val timeStr: String = PersianNumberUtils.toPersianDigits(String.format(Locale.US, "%02d:%02d", hour, minute))
 }
 
 object JalaliCalendarUtils {
     private val tehranTimeZone: TimeZone = TimeZone.getTimeZone("Asia/Tehran")
+    private val minuteCache = java.util.concurrent.ConcurrentHashMap<Long, JalaliDateTime>(512)
 
     private val persianMonths = arrayOf(
         "", "فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور",
@@ -180,6 +200,9 @@ object JalaliCalendarUtils {
         } else {
             System.currentTimeMillis()
         }
+        val minuteKey = effectiveMillis / 60_000L
+        minuteCache[minuteKey]?.let { return it }
+
         val cal = Calendar.getInstance(tehranTimeZone, Locale.US).apply {
             timeInMillis = effectiveMillis
         }
@@ -204,7 +227,7 @@ object JalaliCalendarUtils {
         val (jy, jm, jd) = gregorianToJalali(gy, gm, gd)
         val monthName = persianMonths.getOrElse(jm) { "آبان" }
 
-        return JalaliDateTime(
+        val computed = JalaliDateTime(
             year = jy,
             month = jm,
             day = jd,
@@ -213,6 +236,11 @@ object JalaliCalendarUtils {
             hour = hour,
             minute = minute
         )
+        if (minuteCache.size > 4096) {
+            minuteCache.clear()
+        }
+        minuteCache[minuteKey] = computed
+        return computed
     }
 
     /**
@@ -1184,6 +1212,9 @@ object PersianVoiceSlangParserEngine {
         val directNounWordsPattern = listOf("یه", "یک", "دو", "سه", "چهار", "پنج", "شش", "شیش", "هفت", "هشت", "نه")
             .joinToString("|")
         val directNounRegex = Regex("""(?<=^|\s)($directNounWordsPattern)(?=\s+([^\s]+))""")
+        val indefiniteRecipientNouns = setOf(
+            "فقیر", "نیازمند", "بنده", "گدا", "مسکین", "خیریه", "دوست", "رفیق", "نفر", "بچه", "کودک"
+        )
 
         text = directNounRegex.replace(text) { match ->
             val wordToken = match.groupValues[1]
@@ -1194,6 +1225,7 @@ object PersianVoiceSlangParserEngine {
 
             // Check if preceded by "<tens/hundreds> و " (e.g., "سی و نه تومن" or "بیست و پنج هزار")
             val prefixBeforeMatch = text.substring(0, match.range.first).trimEnd()
+            val prevWordBeforeMatch = prefixBeforeMatch.split(Regex("""\s+""")).lastOrNull().orEmpty()
             val isPartOfCompoundMoney = if (prefixBeforeMatch.endsWith("و")) {
                 val beforeVav = prefixBeforeMatch.removeSuffix("و").trimEnd()
                 val prevWord = beforeVav.split(Regex("""\s+""")).lastOrNull().orEmpty()
@@ -1218,8 +1250,14 @@ object PersianVoiceSlangParserEngine {
             } else {
                 val numericVal = smallQuantityWords[wordToken] ?: 1
                 val key = "⟪QTY${('A' + counter++)}⟫"
-                val persianNum = PersianNumberUtils.toPersianDigits(numericVal.toString())
-                replacements[key] = persianNum
+                val isIndefiniteRecipient = (wordToken == "یه" || wordToken == "یک") &&
+                    (prevWordBeforeMatch == "به" || followingWord in indefiniteRecipientNouns)
+                if (isIndefiniteRecipient) {
+                    replacements[key] = ""
+                } else {
+                    val persianNum = PersianNumberUtils.toPersianDigits(numericVal.toString())
+                    replacements[key] = persianNum
+                }
                 key
             }
         }

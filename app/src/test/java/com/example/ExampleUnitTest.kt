@@ -321,7 +321,73 @@ class ExampleUnitTest {
         // Promo SMS mentioning "گردونه ملی گلد" from a non-bank sender must NOT be guessed as "ملی ایران"
         assertEquals("بانک", BankSmsParserEngine.detectIranianBankName("گردونه ملی گلد ۱۷,۴۳۰ ریال", "10008590"))
     }
+
+    @Test
+    fun testVideoBatch8AndBatch9VoiceScenariosAndIndefiniteRecipient() {
+        // Video batch_9: "دخترم ۵۰ تومان خرج کرد"
+        val daughter = PersianVoiceSlangParserEngine.parseVoiceCommand("دخترم ۵۰ تومان خرج کرد")
+        assertEquals("دخترم خرج کرد", daughter.purposeCategory)
+        assertEquals(50_000L, daughter.totalAmountToman)
+
+        // Video batch_9: "۳۵ تومان هزینه قسط پنجم وام دیشب"
+        val loan5th = PersianVoiceSlangParserEngine.parseVoiceCommand("۳۵ تومان هزینه قسط پنجم وام دیشب")
+        assertEquals("هزینه قسط پنجم وام", loan5th.purposeCategory)
+        assertEquals(35_000L, loan5th.totalAmountToman)
+
+        // Video batch_8: "رفته بودم بیرون ۵۰ تومن میخواستم خرج کنم ولی نکردم ۵۰ تومن دادم بستنی ۳۵ تومن دادم به یه فقیر"
+        val batch8Items = PersianVoiceSlangParserEngine.parseMultiVoiceCommands(
+            "رفته بودم بیرون ۵۰ تومن میخواستم خرج کنم ولی نکردم ۵۰ تومن دادم بستنی ۳۵ تومن دادم به یه فقیر"
+        )
+        assertEquals(2, batch8Items.size)
+        assertEquals("بستنی", batch8Items[0].purposeCategory)
+        assertEquals(50_000L, batch8Items[0].totalAmountToman)
+        assertEquals("فقیر", batch8Items[1].purposeCategory)
+        assertEquals(35_000L, batch8Items[1].totalAmountToman)
+
+        // Video batch_8: "بدهی عسل به احمد عمو" on 9,200,000 Toman Blu transaction
+        val honeyDebt = PersianVoiceSlangParserEngine.parseVoiceCommand(
+            rawSpeech = "بدهی عسل به احمد عمو",
+            fallbackTotalToman = 9_200_000L,
+            defaultBankName = "بلو"
+        )
+        assertEquals("بدهی عسل به احمد عمو", honeyDebt.purposeCategory)
+        assertEquals(9_200_000L, honeyDebt.totalAmountToman)
+        assertEquals("بلو", honeyDebt.storeName)
+    }
+
+    @Test
+    fun testAll38IranianBankLogosIncludingIranVenezuelaAndLtrSenderFormatting() {
+        val all38 = com.example.ui.components.JibemanAssetLogoCache.ALL_38_IRANIAN_BANKS
+        assertEquals(38, all38.size)
+        for ((faName, expectedKey) in all38) {
+            val resolved = com.example.ui.components.JibemanAssetLogoCache.resolveBankLogoKey(faName)
+            assertEquals("Logo key mismatch for $faName", expectedKey, resolved)
+        }
+        assertEquals(
+            "ic_bank_iran_venezuela",
+            com.example.ui.components.JibemanAssetLogoCache.resolveBankLogoKey("ایران ونزوئلا")
+        )
+
+        val ltrSender = PersianNumberUtils.formatLtrSender("+989999987641")
+        assertEquals("\u2066\u200E+989999987641\u2069", ltrSender)
+    }
+
+    @Test
+    fun testFullOrosiRegressionAndStressSuitePasses100Percent() {
+        val report = com.example.domain.OrosiRegressionSuite.runFullRegressionAndStressSuite()
+        for (r in report.results) {
+            assertEquals(
+                "Regression test failed [${r.title}]: expected=${r.expectedSummary}, actual=${r.actualSummary}",
+                true,
+                r.passed
+            )
+        }
+        assertEquals(true, report.allPassed)
+        assertEquals(15, report.totalCount)
+        assertEquals(15, report.passedCount)
+    }
 }
+
 
 
 

@@ -138,7 +138,18 @@ object JibemanAssetLogoCache {
     }
 
     fun resolveBankLogoKey(bankName: String): String? {
-        val clean = PersianNumberUtils.normalizePersianText(bankName)
+        val rawTrimmed = bankName.trim()
+        if (rawTrimmed.isBlank()) return null
+        if (rawTrimmed.startsWith("ic_bank_")) return rawTrimmed
+
+        ALL_38_IRANIAN_BANKS.firstOrNull { (fa, key) ->
+            fa.equals(rawTrimmed, ignoreCase = true) ||
+                key.equals(rawTrimmed, ignoreCase = true) ||
+                PersianNumberUtils.normalizePersianText(fa).replace("\u200C", " ") ==
+                PersianNumberUtils.normalizePersianText(rawTrimmed).replace("\u200C", " ")
+        }?.let { return it.second }
+
+        val clean = PersianNumberUtils.normalizePersianText(rawTrimmed)
             .replace("بانک", "")
             .replace("کارت", "")
             .replace("حساب", "")
@@ -180,7 +191,7 @@ object JibemanAssetLogoCache {
             clean.contains("انصار") || clean.equals("Ansar", ignoreCase = true) -> "ic_bank_ansar"
             clean.contains("قوامین") || clean.equals("Ghavamin", ignoreCase = true) -> "ic_bank_ghavamin"
             clean.contains("حکمت") || clean.equals("Hekmat", ignoreCase = true) -> "ic_bank_hekmat"
-            clean.contains("ونزوئلا") || clean.equals("Iran Venezuela", ignoreCase = true) -> "ic_bank_iran_venezuela"
+            clean.contains("ونزوئلا") || clean.contains("ونزویلا") || clean.equals("Iran Venezuela", ignoreCase = true) -> "ic_bank_iran_venezuela"
             clean.contains("کوثر") || clean.equals("Kosar", ignoreCase = true) -> "ic_bank_kosar"
             clean.contains("ملل") || clean.equals("Melal", ignoreCase = true) -> "ic_bank_melall"
             clean.contains("نور") || clean.equals("Noor", ignoreCase = true) -> "ic_bank_noor"
