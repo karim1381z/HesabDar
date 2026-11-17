@@ -80,6 +80,7 @@ fun TransactionsScreen(
     onChangeMonth: (Int) -> Unit,
     onTransactionClick: (TransactionEntity) -> Unit,
     onUntaggedMicClick: (TransactionEntity) -> Unit,
+    onDeleteTransaction: (TransactionEntity) -> Unit = {},
     onBackToHome: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -373,12 +374,17 @@ fun TransactionsScreen(
                     items = dayGroup.transactions,
                     key = { tx -> "month_tx_${tx.id}" }
                 ) { tx ->
-                    JibemanGroupedTransactionRow(
-                        transaction = tx,
-                        hideAmounts = hideAmounts,
-                        onRowClick = { onTransactionClick(tx) },
-                        onUntaggedMicClick = { onUntaggedMicClick(tx) }
-                    )
+                    TwoStepSwipeToDeleteWrapper(
+                        transactionId = tx.id,
+                        onConfirmDelete = { onDeleteTransaction(tx) }
+                    ) {
+                        JibemanGroupedTransactionRow(
+                            transaction = tx,
+                            hideAmounts = hideAmounts,
+                            onRowClick = { onTransactionClick(tx) },
+                            onUntaggedMicClick = { onUntaggedMicClick(tx) }
+                        )
+                    }
                 }
             }
         }

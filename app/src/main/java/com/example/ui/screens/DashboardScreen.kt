@@ -12,6 +12,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,6 +35,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Visibility
@@ -48,6 +51,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,6 +62,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -100,6 +107,7 @@ fun DashboardScreen(
     onAddVoiceClick: () -> Unit,
     onTransactionClick: (TransactionEntity) -> Unit,
     onUntaggedMicClick: (TransactionEntity) -> Unit,
+    onDeleteTransaction: (TransactionEntity) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val totalAllAccountsBalance = bankAccounts
@@ -278,18 +286,134 @@ fun DashboardScreen(
             }
         }
 
-        // 4. All Recent Transaction Cards (with cached Jalali dates and contentType for 120fps scrolling)
+        // 4. All Recent Transaction Cards (with 2-step swipe-to-delete and cached Jalali dates)
         items(
             items = visibleTransactions,
             key = { tx -> tx.id },
             contentType = { "transaction_card" }
         ) { tx ->
-            CalmTransactionCard(
-                transaction = tx,
-                hideAmounts = settings.hideAmounts,
-                onRowClick = { onTransactionClick(tx) },
-                onUntaggedMicClick = { onUntaggedMicClick(tx) }
-            )
+            TwoStepSwipeToDeleteWrapper(
+                transactionId = tx.id,
+                onConfirmDelete = { onDeleteTransaction(tx) }
+            ) {
+                CalmTransactionCard(
+                    transaction = tx,
+                    hideAmounts = settings.hideAmounts,
+                    onRowClick = { onTransactionClick(tx) },
+                    onUntaggedMicClick = { onUntaggedMicClick(tx) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun TwoStepSwipeToDeleteWrapper(
+    transactionId: Long,
+    onConfirmDelete: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    var isConfirmOpen by remember(transactionId) { mutableStateOf(false) }
+    var dragAccumulated by remember(transactionId) { mutableFloatStateOf(0f) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .pointerInput(transactionId) {
+                detectHorizontalDragGestures(
+                    onDragStart = { dragAccumulated = 0f },
+                    onDragEnd = {
+                        if (kotlin.math.abs(dragAccumulated) > 65f) {
+                            isConfirmOpen = !isConfirmOpen
+                        }
+                        dragAccumulated = 0f
+                    },
+                    onDragCancel = { dragAccumulated = 0f },
+                    onHorizontalDrag = { change, dragAmount ->
+                        change.consume()
+                        dragAccumulated += dragAmount
+                    }
+                )
+            }
+    ) {
+        content()
+
+        AnimatedVisibility(visible = isConfirmOpen) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(RubyRose.copy(alpha = 0.24f))
+                    .border(1.dp, RubyRoseSoft, RoundedCornerShape(16.dp))
+                    .padding(horizontal = 14.dp, vertical = 10.dp)
+                    .testTag("swipe_delete_confirm_bar_$transactionId"),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "حذف این تراکنش؟",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    color = AlabasterSilk,
+                    modifier = Modifier.weight(1f)
+                )
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(RubyRose)
+                            .border(1.dp, RubyRoseSoft, RoundedCornerShape(12.dp))
+                            .clickable {
+                                isConfirmOpen = false
+                                onConfirmDelete()
+                            }
+                            .padding(horizontal = 12.dp, vertical = 7.dp)
+                            .testTag("confirm_swipe_delete_$transactionId")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DeleteOutline,
+                            contentDescription = "حذف قطعی",
+                            tint = AlabasterSilk,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "حذف قطعی",
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.ExtraBold),
+                            color = AlabasterSilk
+                        )
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(OrosiSurfaceHigh)
+                            .border(1.dp, OrosiHairline, RoundedCornerShape(12.dp))
+                            .clickable { isConfirmOpen = false }
+                            .padding(horizontal = 10.dp, vertical = 7.dp)
+                            .testTag("cancel_swipe_delete_$transactionId")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "انصراف",
+                            tint = OrosiOnSurfaceVariant,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "انصراف",
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                            color = AlabasterSilk
+                        )
+                    }
+                }
+            }
         }
     }
 }

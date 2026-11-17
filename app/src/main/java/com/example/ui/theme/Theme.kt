@@ -4,6 +4,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 
@@ -41,12 +42,16 @@ private val OrosiDarkColorScheme = darkColorScheme(
 
 @Composable
 fun MyApplicationTheme(
+    fontFamilyKey: String = "IRANSANSX",
     content: @Composable () -> Unit
 ) {
+    val activeTypography = remember(fontFamilyKey) {
+        buildOrosiTypography(fontFamilyKey)
+    }
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
         MaterialTheme(
             colorScheme = OrosiDarkColorScheme,
-            typography = Typography,
+            typography = activeTypography,
             content = content
         )
     }

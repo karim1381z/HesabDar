@@ -253,6 +253,14 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun setSelectedFontFamily(fontFamilyKey: String) {
+        viewModelScope.launch {
+            val option = com.example.ui.theme.OrosiFontOption.fromKey(fontFamilyKey)
+            repository.setSelectedFontFamily(option.key)
+            showBanner("فونت برنامه به «${option.persianTitle}» تغییر یافت ✓")
+        }
+    }
+
     fun toggleAccountTankhah(bankName: String) {
         viewModelScope.launch {
             repository.toggleAccountTankhah(bankName)

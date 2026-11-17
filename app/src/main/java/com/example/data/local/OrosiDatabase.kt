@@ -143,7 +143,8 @@ data class AppSettingsEntity(
     val dailyAutoSaveEnabled: Boolean = true,
     val hideAmounts: Boolean = false,
     val onlyTankhahMode: Boolean = true,
-    val tankhahModeEnabled: Boolean = false
+    val tankhahModeEnabled: Boolean = false,
+    val selectedFontFamily: String = "IRANSANSX"
 )
 
 @Dao
@@ -234,7 +235,7 @@ interface OrosiDao {
         CommitmentEntity::class,
         AppSettingsEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 abstract class OrosiDatabase : RoomDatabase() {
@@ -244,13 +245,24 @@ abstract class OrosiDatabase : RoomDatabase() {
         @Volatile
         private var INSTANCE: OrosiDatabase? = null
 
+        private val MIGRATION_6_7 = object : androidx.room.migration.Migration(6, 7) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE app_settings ADD COLUMN selectedFontFamily TEXT NOT NULL DEFAULT 'IRANSANSX'"
+                )
+            }
+        }
+
         fun getInstance(context: Context): OrosiDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     OrosiDatabase::class.java,
                     "orosi_finance_v15_jibeman.db"
-                ).fallbackToDestructiveMigration().build()
+                )
+                    .addMigrations(MIGRATION_6_7)
+                    .fallbackToDestructiveMigration()
+                    .build()
                 INSTANCE = instance
                 instance
             }

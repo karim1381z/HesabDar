@@ -1228,6 +1228,7 @@ fun TransactionDetailAndEditBottomSheet(
         mutableStateOf("NORMAL")
     }
     var showRawSms by remember { mutableStateOf(false) }
+    var confirmDeleteClicked by remember(transaction.id) { mutableStateOf(false) }
 
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val isIncome = transaction.type == "INCOME"
@@ -1246,7 +1247,7 @@ fun TransactionDetailAndEditBottomSheet(
                 .padding(bottom = 28.dp)
                 .testTag("transaction_detail_sheet")
         ) {
-            // Header Row: Title (Right in RTL) + Trash Icon & Close Icon (Left in RTL)
+            // Header Row: Title (Right in RTL) + 2-Step Trash Icon & Close Icon (Left in RTL)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1259,20 +1260,46 @@ fun TransactionDetailAndEditBottomSheet(
                 )
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(
-                        onClick = { onDeleteTransaction(transaction) },
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(CircleShape)
-                            .background(RubyRose.copy(alpha = 0.16f))
-                            .testTag("delete_transaction_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.DeleteOutline,
-                            contentDescription = "حذف تراکنش",
-                            tint = RubyRoseSoft,
-                            modifier = Modifier.size(20.dp)
-                        )
+                    if (!confirmDeleteClicked) {
+                        IconButton(
+                            onClick = { confirmDeleteClicked = true },
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(RubyRose.copy(alpha = 0.16f))
+                                .testTag("delete_transaction_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.DeleteOutline,
+                                contentDescription = "حذف تراکنش",
+                                tint = RubyRoseSoft,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    } else {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(RubyRose)
+                                .border(1.dp, RubyRoseSoft, RoundedCornerShape(50))
+                                .clickable { onDeleteTransaction(transaction) }
+                                .padding(horizontal = 12.dp, vertical = 7.dp)
+                                .testTag("delete_transaction_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.DeleteOutline,
+                                contentDescription = "تأیید حذف",
+                                tint = AlabasterSilk,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "تأیید حذف؟",
+                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.ExtraBold),
+                                color = AlabasterSilk
+                            )
+                        }
                     }
                     Spacer(modifier = Modifier.width(6.dp))
                     IconButton(onClick = onDismiss) {
@@ -2279,6 +2306,7 @@ fun PaydayAndBackupBottomSheet(
     backupJsonText: String,
     onSaveSettings: (Int, String, Boolean, Long, Long) -> Unit,
     onSetTankhahModeEnabled: (Boolean) -> Unit = {},
+    onSelectFontFamily: (String) -> Unit = {},
     onImportBackup: (String) -> Unit,
     onResetDefault: () -> Unit,
     onDismiss: () -> Unit
@@ -2327,6 +2355,78 @@ fun PaydayAndBackupBottomSheet(
                         contentDescription = "بستن",
                         tint = OrosiOnSurfaceVariant
                     )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Live 5-Font Family Switcher (IRANSansX Default + Dana + IRANYekanX + Peyda + Vazirmatn)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(OrosiSurfaceContainer)
+                    .border(1.dp, OrosiHairline, RoundedCornerShape(16.dp))
+                    .padding(14.dp)
+                    .testTag("font_family_selector_card"),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "فونت برنامه (اعداد فارسی)",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.ExtraBold),
+                        color = AlabasterSilk
+                    )
+                    val activeOption = com.example.ui.theme.OrosiFontOption.fromKey(settings.selectedFontFamily)
+                    Text(
+                        text = "فعال: ${activeOption.persianTitle} ✓",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = NishapurTurquoiseSoft
+                    )
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    com.example.ui.theme.OrosiFontOption.entries.forEach { option ->
+                        val isSelected = com.example.ui.theme.OrosiFontOption.fromKey(settings.selectedFontFamily) == option
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(
+                                    if (isSelected) NishapurTurquoise else OrosiSurfaceHigh
+                                )
+                                .border(
+                                    width = if (isSelected) 1.5.dp else 1.dp,
+                                    color = if (isSelected) NishapurTurquoiseBright else OrosiHairline,
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                .clickable { onSelectFontFamily(option.key) }
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                                .testTag("select_font_${option.key}")
+                        ) {
+                            Text(
+                                text = option.persianTitle,
+                                style = MaterialTheme.typography.labelLarge.copy(
+                                    fontFamily = option.fontFamily,
+                                    fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium,
+                                    fontSize = 12.5.sp
+                                ),
+                                color = if (isSelected) AlabasterSilk else OrosiOnSurfaceVariant,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                    }
                 }
             }
 
@@ -2582,7 +2682,7 @@ fun PaydayAndBackupBottomSheet(
                             color = AlabasterSilk
                         )
                         Text(
-                            text = "بررسی خودکار ۲۵ سناریوی صوتی، پیامکی، تقویم و بانک‌ها بدون نیاز به تست دستی",
+                            text = "بررسی خودکار ۳۵ سناریوی صوتی پیچیده، پیامکی، تقویم و بانک‌ها بدون نیاز به تست دستی",
                             style = MaterialTheme.typography.labelSmall,
                             color = OrosiOnSurfaceVariant
                         )
@@ -2633,7 +2733,7 @@ fun PaydayAndBackupBottomSheet(
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = if (regressionReport == null) {
-                            "اجرای تست خودکار رگرسیون و استرس (۲۵ سناریو)"
+                            "اجرای تست خودکار رگرسیون و استرس (۳۵ سناریو)"
                         } else {
                             "اجرای مجدد تست استرس (${PersianNumberUtils.toPersianDigits(regressionReport!!.totalDurationMs.toString())} میلی‌ثانیه)"
                         },

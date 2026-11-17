@@ -1043,7 +1043,8 @@ object PersianVoiceSlangParserEngine {
         "حساب کردم",
         "رفتم بیرون",
         "بیرون رفتم",
-        "اشتباه شد"
+        "اشتباه شد",
+        "به مبلغ"
     )
 
     // Note: "برای", "بابت", "بابتِ", "واسه" are intentionally NOT in singleWordConversationalFillers
@@ -1132,6 +1133,20 @@ object PersianVoiceSlangParserEngine {
         "بطری", "جلد", "برگ", "سیخ", "پرس", "قوطی", "پاکت", "شانه", "جفت", "تا"
     )
 
+    private val nonMonetaryMeasurementUnits = listOf(
+        "سوت", "گرم", "کیلوگرم", "کیلو", "مثقال", "قیراط", "عیار",
+        "لیتر", "میلی‌لیتر", "میلی لیتر", "سی‌سی", "سی سی",
+        "متر", "سانتی‌متر", "سانتی متر", "سانت", "میلی‌متر", "میلی متر", "اینچ",
+        "گیگابایت", "گیگ", "مگابایت", "مگ", "ترابایت",
+        "وات", "ولت", "آمپر", "هرتز", "درصد", "درجه",
+        "روزه", "ماهه", "ساله", "ساعته", "نفره", "تکه"
+    )
+
+    private val attributeDescriptorKeywords = listOf(
+        "سایز", "شماره", "مدل", "طبقه", "واحد", "پلاک", "خط", "کد",
+        "جلد", "صفحه", "فصل", "ترم", "کلاس", "پایه", "برگ", "ساعت"
+    )
+
     private val smallQuantityWords = mapOf(
         "یه" to 1,
         "یک" to 1,
@@ -1181,7 +1196,17 @@ object PersianVoiceSlangParserEngine {
         val stumbleRegex = Regex(
             """(?<=^|\s)[۰-۹0-9,٬،]+(?:\s+[۰-۹0-9,٬،]+)*(?=\s+[۰-۹0-9,٬،]+\s*(?:میلیارد|میلیون|ملیون|هزار\s*تومانش|هزار\s*تومنش|هزار\s*تومان|هزار\s*تومن|هزارش|هزار|تومانش|تومنش|تومان|تومن|ریالش|ریال)(?=\s|$))"""
         )
-        return stumbleRegex.replace(normalized, " ").replace(Regex("""\s+"""), " ").trim()
+        return stumbleRegex.replace(normalized) { match ->
+            val before = normalized.substring(0, match.range.first).trimEnd()
+            val prevWord = before.split(Regex("""\s+""")).lastOrNull().orEmpty()
+            val numTokens = match.value.trim().split(Regex("""\s+""")).filter { it.isNotBlank() }
+            if (prevWord in attributeDescriptorKeywords && numTokens.isNotEmpty()) {
+                // Keep the attribute number (e.g. "۴۲" in "سایز ۴۲ ۷۵۰ هزار تومان") and only drop any subsequent stumbled numbers
+                numTokens.first()
+            } else {
+                " "
+            }
+        }.replace(Regex("""\s+"""), " ").trim()
     }
 
     /**
@@ -1274,9 +1299,53 @@ object PersianVoiceSlangParserEngine {
         val replacements = linkedMapOf<String, String>()
         var counter = 0
 
+        val qtyWordsPattern = smallQuantityWords.keys.sortedByDescending { it.length }.joinToString("|")
+        val currencyWordsPattern = currencyAndMultiplierWords.sortedByDescending { it.length }.joinToString("|")
+
+        // Pattern 0A: Non-monetary physical, weight, gold, volume, or technical units (e.g. "۳۵۰ سوت", "۱۸ عیار", "۲۰ گیگ", "۲۰۰ گرم")
+        // Valid anywhere in the clause (including at the very end) so "خرید سکه پارسیان ۳۵۰ سوت" keeps "۳۵۰ سوت" in the title.
+        val measurementUnitsPattern = nonMonetaryMeasurementUnits.sortedByDescending { it.length }.joinToString("|")
+        val measurementRegex = Regex(
+            """(?<=^|\s)([۰-۹0-9]{1,5}(?:\.[۰-۹0-9]+)?|$qtyWordsPattern)\s*($measurementUnitsPattern)(?=\s|$|،)"""
+        )
+        text = measurementRegex.replace(text) { match ->
+            val rawNumToken = match.groupValues[1]
+            val unitToken = match.groupValues[2].trim()
+            val numericVal = smallQuantityWords[rawNumToken]
+                ?: PersianNumberUtils.toEnglishDigits(rawNumToken).toIntOrNull()
+            val formattedNum = if (numericVal != null) {
+                PersianNumberUtils.toPersianDigits(numericVal.toString())
+            } else {
+                PersianNumberUtils.toPersianDigits(rawNumToken)
+            }
+            val key = "⟪QTY${('A' + counter++)}⟫"
+            replacements[key] = "$formattedNum $unitToken"
+            key
+        }
+
+        // Pattern 0B: Descriptive attribute keyword followed by a number (e.g. "سایز ۴۲", "واحد ۵", "طبقه ۳", "مدل ۱۴۰۳", "پلاک ۱۲")
+        // Protected as long as the number is NOT immediately followed by a currency/multiplier word (so "واحد ۵۰۰ تومن" still parses ۵۰۰ تومن).
+        val descriptorPattern = attributeDescriptorKeywords.sortedByDescending { it.length }.joinToString("|")
+        val descriptorRegex = Regex(
+            """(?<=^|\s)($descriptorPattern)\s+([۰-۹0-9]{1,5}|$qtyWordsPattern)(?!\s*(?:$currencyWordsPattern)(?=\s|$|،))(?=\s|$|،)"""
+        )
+        text = descriptorRegex.replace(text) { match ->
+            val descWord = match.groupValues[1].trim()
+            val rawNumToken = match.groupValues[2].trim()
+            val numericVal = smallQuantityWords[rawNumToken]
+                ?: PersianNumberUtils.toEnglishDigits(rawNumToken).toIntOrNull()
+            val formattedNum = if (numericVal != null) {
+                PersianNumberUtils.toPersianDigits(numericVal.toString())
+            } else {
+                PersianNumberUtils.toPersianDigits(rawNumToken)
+            }
+            val key = "⟪QTY${('A' + counter++)}⟫"
+            replacements[key] = "$descWord $formattedNum"
+            key
+        }
+
         // Pattern A: <number word or 1..2 digit number> + <counting unit (تا/دونه/عدد/بسته/کیلو/...)> + <non-currency noun>
         val unitsPattern = countingUnits.joinToString("|")
-        val qtyWordsPattern = smallQuantityWords.keys.sortedByDescending { it.length }.joinToString("|")
         val withUnitRegex = Regex(
             """(?<=^|\s)($qtyWordsPattern|[۰-۹0-9]{1,2})\s*($unitsPattern)(?=\s+([^\s]+))"""
         )
@@ -2170,8 +2239,10 @@ object PersianVoiceSlangParserEngine {
     }
 
     private fun detectSpokenCardBankInVoice(speech: String): String {
-        val cardBankRegex = Regex("""کارت\s+(بلو|ملت|ملی|سپه|پاسارگاد|سامان|صادرات|تجارت|رسالت|ویپاد|مسکن|رفاه|پارسیان|کشاورزی|گردشگری|شهر|سینا|آینده|دی|کارآفرین)""")
-        val match = cardBankRegex.find(speech) ?: return "بانک"
+        val bankNamesPattern = "بلو|ملت|ملی|سپه|پاسارگاد|سامان|صادرات|تجارت|رسالت|ویپاد|مسکن|رفاه|پارسیان|کشاورزی|گردشگری|شهر|سینا|آینده|دی|کارآفرین"
+        val explicitSourceCardRegex = Regex("""(?:با|از)\s+کارت\s+($bankNamesPattern)(?=\s|$)""")
+        val fallbackCardRegex = Regex("""(?<!به\s)کارت\s+($bankNamesPattern)(?=\s|$)""")
+        val match = explicitSourceCardRegex.find(speech) ?: fallbackCardRegex.find(speech) ?: return "بانک"
         return when (val raw = match.groupValues[1]) {
             "ملی" -> "ملی ایران"
             "صادرات" -> "صادرات ایران"
@@ -2264,8 +2335,8 @@ object PersianVoiceSlangParserEngine {
         )
 
         corePhrase = corePhrase
-            .replace(Regex("""با\s+کارت\s+[^\s]+"""), " ")
-            .replace(Regex("""کارت\s+(?:بلو|ملت|ملی|سپه|پاسارگاد|سامان|صادرات|تجارت|رسالت|ویپاد|مسکن|رفاه)"""), " ")
+            .replace(Regex("""(?:با|از)\s+کارت\s+[^\s]+"""), " ")
+            .replace(Regex("""(?<!به\s)کارت\s+(?:بلو|ملت|ملی|سپه|پاسارگاد|سامان|صادرات|تجارت|رسالت|ویپاد|مسکن|رفاه|پارسیان|کشاورزی|گردشگری|شهر|سینا|آینده|دی|کارآفرین)"""), " ")
 
         val explicitFromPattern = Regex("""(.+?)\s+از\s+(.+)""")
         val explicitMatch = explicitFromPattern.find(corePhrase.trim())

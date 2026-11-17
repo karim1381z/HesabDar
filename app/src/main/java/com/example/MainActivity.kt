@@ -126,9 +126,11 @@ class MainActivity : ComponentActivity() {
                     isAppearanceLightNavigationBars = false
                 }
             }
-            MyApplicationTheme {
-                val viewModel: OrosiViewModel = viewModel()
-                val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+            val viewModel: OrosiViewModel = viewModel()
+            val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+            MyApplicationTheme(
+                fontFamilyKey = uiState.settings.selectedFontFamily
+            ) {
                 OrosiFinanceApp(
                     uiState = uiState,
                     viewModel = viewModel
@@ -346,7 +348,8 @@ fun OrosiFinanceApp(
                             onTransactionClick = { tx -> viewModel.openTransactionDetails(tx) },
                             onUntaggedMicClick = { tx ->
                                 viewModel.openVoiceForUntaggedTransaction(tx)
-                            }
+                            },
+                            onDeleteTransaction = { tx -> viewModel.deleteTransaction(tx) }
                         )
                     }
 
@@ -360,6 +363,7 @@ fun OrosiFinanceApp(
                             onUntaggedMicClick = { tx ->
                                 viewModel.openVoiceForUntaggedTransaction(tx)
                             },
+                            onDeleteTransaction = { tx -> viewModel.deleteTransaction(tx) },
                             onBackToHome = { viewModel.navigateTo(OrosiScreen.HOME) }
                         )
                     }
@@ -471,6 +475,7 @@ fun OrosiFinanceApp(
                 viewModel.savePaydayAndGoldSettings(day, label, autoSalary, goldPrice, dailySafe)
             },
             onSetTankhahModeEnabled = { viewModel.setTankhahModeEnabled(it) },
+            onSelectFontFamily = { viewModel.setSelectedFontFamily(it) },
             onImportBackup = { viewModel.importBackupJson(it) },
             onResetDefault = { viewModel.resetDatabaseToDefault() },
             onDismiss = { viewModel.setShowPaydayBackupModal(false) }

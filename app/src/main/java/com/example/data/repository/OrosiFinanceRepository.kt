@@ -1060,6 +1060,12 @@ class OrosiFinanceRepository(
         persistSnapshotToSharedPrefs()
     }
 
+    suspend fun setSelectedFontFamily(fontFamilyKey: String) {
+        val current = dao.getSettingsNow() ?: AppSettingsEntity()
+        dao.saveSettings(current.copy(selectedFontFamily = fontFamilyKey.trim().ifEmpty { "IRANSANSX" }))
+        persistSnapshotToSharedPrefs()
+    }
+
     suspend fun toggleAccountTankhah(bankName: String) {
         val account = dao.getBankAccountByName(bankName) ?: return
         dao.upsertBankAccount(account.copy(isTankhah = !account.isTankhah))
@@ -1299,6 +1305,7 @@ class OrosiFinanceRepository(
             put("hideAmounts", settings.hideAmounts)
             put("onlyTankhahMode", settings.onlyTankhahMode)
             put("tankhahModeEnabled", settings.tankhahModeEnabled)
+            put("selectedFontFamily", settings.selectedFontFamily)
         }
         root.put("settings", settingsObj)
 
@@ -1387,7 +1394,8 @@ class OrosiFinanceRepository(
                         autoDetectSalary = sObj.optBoolean("autoDetectSalary", true),
                         hideAmounts = sObj.optBoolean("hideAmounts", false),
                         onlyTankhahMode = sObj.optBoolean("onlyTankhahMode", true),
-                        tankhahModeEnabled = sObj.optBoolean("tankhahModeEnabled", false)
+                        tankhahModeEnabled = sObj.optBoolean("tankhahModeEnabled", false),
+                        selectedFontFamily = sObj.optString("selectedFontFamily", "IRANSANSX")
                     )
                 )
             }

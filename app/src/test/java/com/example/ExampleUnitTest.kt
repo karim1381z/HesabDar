@@ -453,6 +453,52 @@ class ExampleUnitTest {
     }
 
     @Test
+    fun testVideo66BatchAndBatch11StressScenarios() {
+        // 1. Video 66batch_11 (00:05): "خرید سکه پارسیان ۳۵۰ سوت" on 1,951,672 Toman Blu SMS
+        val goldCoin = PersianVoiceSlangParserEngine.parseVoiceCommand(
+            rawSpeech = "خرید سکه پارسیان ۳۵۰ سوت",
+            fallbackTotalToman = 1_951_672L,
+            defaultBankName = "بلو"
+        )
+        assertEquals("سکه پارسیان ۳۵۰ سوت", goldCoin.purposeCategory)
+        assertEquals(1_951_672L, goldCoin.totalAmountToman)
+        assertNull(
+            PersianVoiceSlangParserEngine.detectBankSmsAmountMismatch(
+                rawSpeech = "خرید سکه پارسیان ۳۵۰ سوت",
+                fallbackTotalToman = 1_951_672L
+            )
+        )
+
+        // 2. Video 66batch_11 (00:46): "خرید کفش سایز ۴۲" without price -> 0 Tomans (does not mistake 42 for 42,000 Tomans)
+        val shoeNoPrice = PersianVoiceSlangParserEngine.parseVoiceCommand("خرید کفش سایز ۴۲")
+        assertEquals("کفش سایز ۴۲", shoeNoPrice.purposeCategory)
+        assertEquals(0L, shoeNoPrice.totalAmountToman)
+
+        // 3. Video 66batch_11 (00:59): "خرید کفش سایز ۴۲ ۷۵۰ هزار تومان" -> title "کفش سایز ۴۲", amount 750,000 Tomans
+        val shoeWithPrice = PersianVoiceSlangParserEngine.parseVoiceCommand("خرید کفش سایز ۴۲ ۷۵۰ هزار تومان")
+        assertEquals("کفش سایز ۴۲", shoeWithPrice.purposeCategory)
+        assertEquals(750_000L, shoeWithPrice.totalAmountToman)
+
+        // 4. Video 66batch (00:25): "انتقال وجه به کارت بلو" on 50,000 Toman Pasargad SMS
+        val toBluCard = PersianVoiceSlangParserEngine.parseVoiceCommand(
+            rawSpeech = "انتقال وجه به کارت بلو",
+            fallbackTotalToman = 50_000L,
+            defaultBankName = "پاسارگاد"
+        )
+        assertEquals("انتقال وجه به کارت بلو", toBluCard.purposeCategory)
+        assertEquals(50_000L, toBluCard.totalAmountToman)
+        assertEquals("پاسارگاد", toBluCard.storeName)
+
+        // 5. Source vs Destination Card: "۱۰۰ تومن انتقال وجه به کارت بلو با کارت پاسارگاد"
+        val destAndSourceCard = PersianVoiceSlangParserEngine.parseVoiceCommand(
+            "۱۰۰ تومن انتقال وجه به کارت بلو با کارت پاسارگاد"
+        )
+        assertEquals("انتقال وجه به کارت بلو", destAndSourceCard.purposeCategory)
+        assertEquals(100_000L, destAndSourceCard.totalAmountToman)
+        assertEquals("کارت پاسارگاد", destAndSourceCard.cardLabel)
+    }
+
+    @Test
     fun testFullOrosiRegressionAndStressSuitePasses100Percent() {
         val report = com.example.domain.OrosiRegressionSuite.runFullRegressionAndStressSuite()
         for (r in report.results) {
@@ -463,8 +509,8 @@ class ExampleUnitTest {
             )
         }
         assertEquals(true, report.allPassed)
-        assertEquals(25, report.totalCount)
-        assertEquals(25, report.passedCount)
+        assertEquals(35, report.totalCount)
+        assertEquals(35, report.passedCount)
     }
 }
 

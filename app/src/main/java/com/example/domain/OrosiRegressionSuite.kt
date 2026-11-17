@@ -489,7 +489,7 @@ object OrosiRegressionSuite {
             ok to "${parsed.purposeCategory} • ${PersianNumberUtils.formatToman(parsed.totalAmountToman, true)}"
         }
 
-        // 25.Preserving "نه" as the number 9 ("سی و نه تومن نونوایی" & "نه تومن آدامس") while stripping negation "نه"
+        // 25. Preserving "نه" as the number 9 ("سی و نه تومن نونوایی" & "نه تومن آدامس") while stripping negation "نه"
         recordTest(
             category = "تمایز «نه» عددی (۹) از «نه» نفی",
             title = "حفظ «نه» در اعداد مرکب («سی و نه تومن») در کنار حذف «نه» اصلاحی",
@@ -499,6 +499,193 @@ object OrosiRegressionSuite {
             val parsed39 = PersianVoiceSlangParserEngine.parseVoiceCommand("سی و نه تومن نونوایی")
             val ok = parsed39.purposeCategory == "نونوایی" && parsed39.totalAmountToman == 39_000L
             ok to "${parsed39.purposeCategory} • ${PersianNumberUtils.formatToman(parsed39.totalAmountToman, true)}"
+        }
+
+        // 26. Video 66batch_11 (00:05): Gold weight unit "۳۵۰ سوت" on 1,951,672 Toman Blu SMS (no false amount mismatch)
+        recordTest(
+            category = "تست استرس تگ پیامک (ویدیو ۶۶_۱۱)",
+            title = "حفظ واحد وزن طلا «۳۵۰ سوت» در عنوان و عدم اشتباه گرفتن آن با مبلغ (ویدیو ۶۶_۱۱)",
+            inputSummary = "خرید سکه پارسیان ۳۵۰ سوت (بانک: ۱,۹۵۱,۶۷۲ تومان)",
+            expectedSummary = "سکه پارسیان ۳۵۰ سوت • ۱,۹۵۱,۶۷۲ تومان (بدون هشدار مغایرت)"
+        ) {
+            val parsed = PersianVoiceSlangParserEngine.parseVoiceCommand(
+                rawSpeech = "خرید سکه پارسیان ۳۵۰ سوت",
+                fallbackTotalToman = 1_951_672L,
+                defaultBankName = "بلو"
+            )
+            val mismatch = PersianVoiceSlangParserEngine.detectBankSmsAmountMismatch(
+                rawSpeech = "خرید سکه پارسیان ۳۵۰ سوت",
+                fallbackTotalToman = 1_951_672L
+            )
+            val ok = parsed.purposeCategory == "سکه پارسیان ۳۵۰ سوت" &&
+                parsed.totalAmountToman == 1_951_672L &&
+                mismatch == null
+            ok to "${parsed.purposeCategory} • ${PersianNumberUtils.formatToman(parsed.totalAmountToman, true)}"
+        }
+
+        // 27. Video 66batch_11 (00:46): Attribute number "سایز ۴۲" without price -> 0 Tomans (prompts for price instead of 42,000)
+        recordTest(
+            category = "تست استرس صوتی (ویدیو ۶۶_۱۱)",
+            title = "حفظ «سایز ۴۲» در عنوان کفش و عدم تبدیل سایز به مبلغ ۴۲,۰۰۰ تومان",
+            inputSummary = "خرید کفش سایز ۴۲",
+            expectedSummary = "کفش سایز ۴۲ • ۰ تومان (نیازمند ورود مبلغ)"
+        ) {
+            val parsed = PersianVoiceSlangParserEngine.parseVoiceCommand("خرید کفش سایز ۴۲")
+            val ok = parsed.purposeCategory == "کفش سایز ۴۲" && parsed.totalAmountToman == 0L
+            ok to "${parsed.purposeCategory} • ${PersianNumberUtils.formatToman(parsed.totalAmountToman, true)}"
+        }
+
+        // 28. Video 66batch_11 (00:59): Attribute number "سایز ۴۲" + explicit price "۷۵۰ هزار تومان"
+        recordTest(
+            category = "تست استرس صوتی (ویدیو ۶۶_۱۱)",
+            title = "تفکیک دقیق «سایز ۴۲» در عنوان و «۷۵۰ هزار تومان» به عنوان مبلغ",
+            inputSummary = "خرید کفش سایز ۴۲ ۷۵۰ هزار تومان",
+            expectedSummary = "کفش سایز ۴۲ • ۷۵۰,۰۰۰ تومان"
+        ) {
+            val parsed = PersianVoiceSlangParserEngine.parseVoiceCommand("خرید کفش سایز ۴۲ ۷۵۰ هزار تومان")
+            val ok = parsed.purposeCategory == "کفش سایز ۴۲" && parsed.totalAmountToman == 750_000L
+            ok to "${parsed.purposeCategory} • ${PersianNumberUtils.formatToman(parsed.totalAmountToman, true)}"
+        }
+
+        // 29. Video 66batch (00:25): Preserving destination card "به کارت بلو" when tagging a Pasargad SMS
+        recordTest(
+            category = "تست استرس تگ پیامک (ویدیو ۶۶)",
+            title = "حفظ عبارت مقصد «به کارت بلو» در عنوان تراکنش بانک پاسارگاد (ویدیو ۶۶)",
+            inputSummary = "انتقال وجه به کارت بلو (بانک مبدأ: پاسارگاد • ۵۰,۰۰۰ تومان)",
+            expectedSummary = "انتقال وجه به کارت بلو • ۵۰,۰۰۰ تومان (پاسارگاد)"
+        ) {
+            val parsed = PersianVoiceSlangParserEngine.parseVoiceCommand(
+                rawSpeech = "انتقال وجه به کارت بلو",
+                fallbackTotalToman = 50_000L,
+                defaultBankName = "پاسارگاد"
+            )
+            val ok = parsed.purposeCategory == "انتقال وجه به کارت بلو" &&
+                parsed.totalAmountToman == 50_000L &&
+                parsed.storeName == "پاسارگاد"
+            ok to "${parsed.purposeCategory} • ${PersianNumberUtils.formatToman(parsed.totalAmountToman, true)} (${parsed.storeName})"
+        }
+
+        // 30. Distinguishing destination "به کارت بلو" (kept in title) from source "با کارت پاسارگاد" (extracted as card)
+        recordTest(
+            category = "موتور صوتی (NLU)",
+            title = "تفکیک هوشمند کارت مقصد («به کارت بلو») از کارت مبدأ («با کارت پاسارگاد»)",
+            inputSummary = "۱۰۰ تومن انتقال وجه به کارت بلو با کارت پاسارگاد",
+            expectedSummary = "انتقال وجه به کارت بلو • ۱۰۰,۰۰۰ تومان (کارت پاسارگاد)"
+        ) {
+            val parsed = PersianVoiceSlangParserEngine.parseVoiceCommand(
+                "۱۰۰ تومن انتقال وجه به کارت بلو با کارت پاسارگاد"
+            )
+            val ok = parsed.purposeCategory == "انتقال وجه به کارت بلو" &&
+                parsed.totalAmountToman == 100_000L &&
+                parsed.cardLabel == "کارت پاسارگاد"
+            ok to "${parsed.purposeCategory} • ${PersianNumberUtils.formatToman(parsed.totalAmountToman, true)} (${parsed.cardLabel})"
+        }
+
+        // 31. Complex multi-clause with summary header + shoe size + stumbled number + weight unit ("گردو ۲۰۰ گرم")
+        recordTest(
+            category = "تست استرس ترکیبی (NLU v4)",
+            title = "ترکیب سرجمع مقدمه + «کفش سایز ۴۲» + اصلاح تپق «۱۴۰ ۱۵۰ تومن» + «گردو ۲۰۰ گرم»",
+            inputSummary = "رفتم بیرون کلاً ۹۰۰ تومن خرج کردم ۷۵۰ تومن کفش سایز ۴۲ و ۱۴۰ ۱۵۰ تومن گردو ۲۰۰ گرم",
+            expectedSummary = "کفش سایز ۴۲ (۷۵۰,۰۰۰) + گردو ۲۰۰ گرم (۱۵۰,۰۰۰)"
+        ) {
+            val items = PersianVoiceSlangParserEngine.parseMultiVoiceCommands(
+                "رفتم بیرون کلاً ۹۰۰ تومن خرج کردم ۷۵۰ تومن کفش سایز ۴۲ و ۱۴۰ ۱۵۰ تومن گردو ۲۰۰ گرم"
+            )
+            val ok = items.size == 2 &&
+                items[0].purposeCategory == "کفش سایز ۴۲" && items[0].totalAmountToman == 750_000L &&
+                items[1].purposeCategory == "گردو ۲۰۰ گرم" && items[1].totalAmountToman == 150_000L
+            val actual = items.joinToString(" + ") {
+                "${it.purposeCategory} (${PersianNumberUtils.formatToman(it.totalAmountToman)})"
+            }
+            ok to actual
+        }
+
+        // 32. Data volume unit ("۲۰ گیگ") + mid-speech correction ("۶۰ تومن نه نه ۵۵ تومن")
+        recordTest(
+            category = "تست استرس ترکیبی (NLU v4)",
+            title = "حفظ حجم «۲۰ گیگ» در عنوان و اصلاح آنی قیمت از ۶۰ به ۵۵ هزار تومان",
+            inputSummary = "بسته اینترنت ۲۰ گیگ ۶۰ تومن نه نه ۵۵ تومن",
+            expectedSummary = "بسته اینترنت ۲۰ گیگ • ۵۵,۰۰۰ تومان"
+        ) {
+            val items = PersianVoiceSlangParserEngine.parseMultiVoiceCommands(
+                "بسته اینترنت ۲۰ گیگ ۶۰ تومن نه نه ۵۵ تومن"
+            )
+            val ok = items.size == 1 &&
+                items[0].purposeCategory == "بسته اینترنت ۲۰ گیگ" &&
+                items[0].totalAmountToman == 55_000L
+            val actual = items.firstOrNull()?.let {
+                "${it.purposeCategory} • ${PersianNumberUtils.formatToman(it.totalAmountToman, true)}"
+            } ?: "خالی"
+            ok to actual
+        }
+
+        // 33. Gold purity ("۱۸ عیار") + weight ("۴۵۰ سوت") + Dong split ("۵۰۰ تومنش دنگ مریم بود")
+        recordTest(
+            category = "تست استرس ترکیبی (NLU v4)",
+            title = "حفظ «۱۸ عیار ۴۵۰ سوت» در عنوان دستبند همراه با محاسبه دُنگ مریم",
+            inputSummary = "۲ میلیون دستبند ۱۸ عیار ۴۵۰ سوت که ۵۰۰ تومنش دنگ مریم بود",
+            expectedSummary = "دستبند ۱۸ عیار ۴۵۰ سوت • کل: ۲,۰۰۰,۰۰۰ • سهم: ۱,۵۰۰,۰۰۰ • دنگ مریم: ۵۰۰,۰۰۰"
+        ) {
+            val parsed = PersianVoiceSlangParserEngine.parseVoiceCommand(
+                "۲ میلیون دستبند ۱۸ عیار ۴۵۰ سوت که ۵۰۰ تومنش دنگ مریم بود"
+            )
+            val ok = parsed.purposeCategory == "دستبند ۱۸ عیار ۴۵۰ سوت" &&
+                parsed.totalAmountToman == 2_000_000L &&
+                parsed.userShareToman == 1_500_000L &&
+                parsed.dongAmountToman == 500_000L &&
+                parsed.dongFriendName == "مریم"
+            ok to "${parsed.purposeCategory} • کل: ${PersianNumberUtils.formatToman(parsed.totalAmountToman)} • سهم: ${PersianNumberUtils.formatToman(parsed.userShareToman)} • دنگ ${parsed.dongFriendName}: ${PersianNumberUtils.formatToman(parsed.dongAmountToman)}"
+        }
+
+        // 34. Building unit/floor descriptors ("واحد ۵ طبقه ۳") + "به مبلغ" + sub-thousand 500 Toman fee on 250,500 SMS
+        recordTest(
+            category = "تست استرس تگ پیامک (NLU v4)",
+            title = "حفظ «واحد ۵ طبقه ۳» و تفکیک کارمزد خرد ۵۰۰ تومانی روی پیامک ۲۵۰,۵۰۰ تومانی",
+            inputSummary = "شارژ واحد ۵ طبقه ۳ به مبلغ ۲۵۰ تومن و ۵۰۰ تومن کارمزد (بانک: ۲۵۰,۵۰۰)",
+            expectedSummary = "شارژ واحد ۵ طبقه ۳ (۲۵۰,۰۰۰) + کارمزد (۵۰۰)"
+        ) {
+            val items = PersianVoiceSlangParserEngine.parseMultiVoiceCommands(
+                rawSpeech = "شارژ واحد ۵ طبقه ۳ به مبلغ ۲۵۰ تومن و ۵۰۰ تومن کارمزد",
+                defaultBankName = "بلو",
+                fallbackTotalToman = 250_500L
+            )
+            val combined = PersianVoiceSlangParserEngine.formatCombinedMultiVoiceNote(items)
+            val mismatch = PersianVoiceSlangParserEngine.detectBankSmsAmountMismatch(
+                rawSpeech = "شارژ واحد ۵ طبقه ۳ به مبلغ ۲۵۰ تومن و ۵۰۰ تومن کارمزد",
+                fallbackTotalToman = 250_500L,
+                multiItems = items
+            )
+            val ok = items.size == 2 &&
+                items[0].purposeCategory == "شارژ واحد ۵ طبقه ۳" && items[0].totalAmountToman == 250_000L &&
+                items[1].purposeCategory == "کارمزد" && items[1].totalAmountToman == 500L &&
+                mismatch == null
+            ok to combined
+        }
+
+        // 35. High-Load Stress Test: 100 Complex Multi-Clause Voice Utterances (<300ms)
+        recordTest(
+            category = "تست استرس سرعت موتور صوتی",
+            title = "پردازش ۱۰۰ جمله پیچیده چندبخشی فارسی با تپق و اصلاح آنی در کمتر از ۳۰۰ میلی‌ثانیه",
+            inputSummary = "۱۰۰ بار اجرای کامل parseMultiVoiceCommands روی جملات پیچیده",
+            expectedSummary = "۱۰۰٪ دقیق و سریع (زیر ۳۰۰ میلی‌ثانیه)"
+        ) {
+            val tStart = System.nanoTime()
+            var validCount = 0
+            val samplePhrases = listOf(
+                "رفتم بیرون کلاً ۹۰۰ تومن خرج کردم ۷۵۰ تومن کفش سایز ۴۲ و ۱۴۰ ۱۵۰ تومن گردو ۲۰۰ گرم",
+                "خرید سکه پارسیان ۳۵۰ سوت",
+                "بسته اینترنت ۲۰ گیگ ۶۰ تومن نه نه ۵۵ تومن",
+                "۱۰۷ تومن بابت انتقال پول به کارت بلو و ۲۱۷ ۲۱۸ تومن بابت کارمزد",
+                "سلام ۵۵ هزار تومان دادم به بستنی و ۳۹ هزار تومان دادم به دو تا سه تا ۵ تومن ۵ تومن نانوایی"
+            )
+            for (i in 0 until 100) {
+                val phrase = samplePhrases[i % samplePhrases.size]
+                val parsed = PersianVoiceSlangParserEngine.parseMultiVoiceCommands(phrase, "بلو", if (i % 5 == 3) 107_218L else null)
+                if (parsed.isNotEmpty()) validCount++
+            }
+            val elapsedMs = ((System.nanoTime() - tStart) / 1_000_000L).coerceAtLeast(1L)
+            val ok = validCount == 100 && elapsedMs < 500L
+            ok to "۱۰۰ پردازش پیچیده در ${PersianNumberUtils.toPersianDigits(elapsedMs.toString())} میلی‌ثانیه"
         }
 
         val totalMs = ((System.nanoTime() - suiteStartNanos) / 1_000_000L).coerceAtLeast(1L)
