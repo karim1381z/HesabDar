@@ -112,6 +112,7 @@ fun DashboardScreen(
     onTransactionClick: (TransactionEntity) -> Unit,
     onUntaggedMicClick: (TransactionEntity) -> Unit,
     onDeleteTransaction: (TransactionEntity) -> Unit = {},
+    onOpenTransactionsTab: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val totalAllAccountsBalance = bankAccounts
@@ -137,6 +138,9 @@ fun DashboardScreen(
 
     val visibleTransactions = androidx.compose.runtime.remember(transactions) {
         transactions.filter { it.totalAmountToman > 0L }
+    }
+    val recentTransactions = androidx.compose.runtime.remember(visibleTransactions) {
+        visibleTransactions.take(20)
     }
 
     LazyColumn(
@@ -290,9 +294,9 @@ fun DashboardScreen(
             }
         }
 
-        // 4. All Recent Transaction Cards (with in-place 2-step swipe/long-press delete & 120Hz smooth scroll)
+        // 4. Recent Transaction Cards (Top 20 on Home for 120Hz butter-smooth scroll + Long-Press 2-step delete)
         items(
-            items = visibleTransactions,
+            items = recentTransactions,
             key = { tx -> tx.id },
             contentType = { "transaction_card" }
         ) { tx ->
@@ -309,6 +313,28 @@ fun DashboardScreen(
                 )
             }
         }
+
+        if (visibleTransactions.isNotEmpty()) {
+            item(key = "view_all_transactions_footer", contentType = "footer_link") {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(OrosiSurfaceHigh)
+                        .border(1.dp, NishapurTurquoiseBright.copy(alpha = 0.45f), RoundedCornerShape(18.dp))
+                        .clickable(onClick = onOpenTransactionsTab)
+                        .padding(vertical = 14.dp, horizontal = 18.dp)
+                        .testTag("view_all_transactions_button")
+                ) {
+                    Text(
+                        text = "مشاهده همه تراکنش‌ها (${PersianNumberUtils.toPersianDigits(visibleTransactions.size.toString())} مورد) >",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.ExtraBold),
+                        color = NishapurTurquoiseSoft
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -319,164 +345,98 @@ fun TwoStepSwipeToDeleteWrapper(
     content: @Composable (onLongPressTrigger: () -> Unit) -> Unit
 ) {
     var isConfirmOpen by remember(transactionId) { mutableStateOf(false) }
-    var dragOffsetPx by remember(transactionId) { mutableFloatStateOf(0f) }
-    var slideSign by remember(transactionId) { mutableFloatStateOf(-1f) }
 
-    val density = LocalDensity.current
-    val revealPx = remember(density) { with(density) { 196.dp.toPx() } }
+    Box(modifier = Modifier.fillMaxWidth()) {
+        // Foreground card with zero horizontal drag pointerInput overhead for 120Hz scrolling
+        content {
+            isConfirmOpen = !isConfirmOpen
+        }
 
-    val targetOffsetPx = if (isConfirmOpen) slideSign * revealPx else 0f
-    val animatedOffsetPx by animateFloatAsState(
-        targetValue = targetOffsetPx + dragOffsetPx,
-        animationSpec = tween(
-            durationMillis = if (dragOffsetPx != 0f) 0 else 220,
-            easing = FastOutSlowInEasing
-        ),
-        label = "inPlaceCardSlideOffset"
-    )
-
-    val isBackgroundVisible = isConfirmOpen || kotlin.math.abs(animatedOffsetPx) > 6f
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .pointerInput(transactionId, revealPx) {
-                awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    val touchSlop = viewConfiguration.touchSlop
-                    var totalDx = 0f
-                    var totalDy = 0f
-                    var lockedHorizontal = false
-                    var rejectedAsVertical = false
-
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                        if (!change.pressed) break
-
-                        val dx = change.position.x - change.previousPosition.x
-                        val dy = change.position.y - change.previousPosition.y
-                        totalDx += dx
-                        totalDy += dy
-
-                        if (!lockedHorizontal && !rejectedAsVertical) {
-                            val absDx = kotlin.math.abs(totalDx)
-                            val absDy = kotlin.math.abs(totalDy)
-                            if (absDy > touchSlop * 0.85f && absDy > absDx * 0.7f) {
-                                // Yield immediately to vertical LazyColumn scrolling
-                                rejectedAsVertical = true
-                                break
-                            } else if (absDx > touchSlop * 1.35f && absDx > absDy * 2.6f) {
-                                lockedHorizontal = true
-                            }
-                        }
-
-                        if (lockedHorizontal) {
-                            change.consume()
-                            dragOffsetPx = (dragOffsetPx + dx).coerceIn(-revealPx * 1.15f, revealPx * 1.15f)
-                        }
-                    }
-
-                    if (lockedHorizontal) {
-                        if (kotlin.math.abs(dragOffsetPx) > revealPx * 0.30f) {
-                            slideSign = if (dragOffsetPx >= 0f) 1f else -1f
-                            isConfirmOpen = !isConfirmOpen
-                        }
-                        dragOffsetPx = 0f
-                    }
-                }
-            }
-    ) {
-        // Behind-card action panel in the exact same row slot (never expands vertically underneath)
-        if (isBackgroundVisible) {
-            val alignOnRightInRtl = animatedOffsetPx <= 0f
+        // In-place 2-step confirmation overlay triggered by Long-Press (never expands row height)
+        if (isConfirmOpen) {
             Box(
                 modifier = Modifier
                     .matchParentSize()
                     .clip(RoundedCornerShape(20.dp))
-                    .background(RubyRose.copy(alpha = 0.26f))
-                    .border(1.dp, RubyRoseSoft.copy(alpha = 0.75f), RoundedCornerShape(20.dp))
-                    .padding(horizontal = 12.dp)
+                    .background(OrosiSurfaceHigh.copy(alpha = 0.96f))
+                    .border(1.5.dp, RubyRoseSoft, RoundedCornerShape(20.dp))
+                    .padding(horizontal = 14.dp)
                     .testTag("swipe_delete_confirm_bar_$transactionId"),
-                contentAlignment = if (alignOnRightInRtl) Alignment.CenterStart else Alignment.CenterEnd
+                contentAlignment = Alignment.Center
             ) {
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(RubyRose)
-                            .border(1.dp, RubyRoseSoft, RoundedCornerShape(12.dp))
-                            .clickable {
-                                isConfirmOpen = false
-                                dragOffsetPx = 0f
-                                onConfirmDelete()
-                            }
-                            .padding(horizontal = 11.dp, vertical = 8.dp)
-                            .testTag("confirm_swipe_delete_$transactionId")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.DeleteOutline,
-                            contentDescription = "حذف قطعی",
-                            tint = AlabasterSilk,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "حذف قطعی",
-                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.ExtraBold),
-                            color = AlabasterSilk,
-                            maxLines = 1,
-                            softWrap = false
-                        )
-                    }
+                    Text(
+                        text = "حذف این تراکنش؟",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.ExtraBold),
+                        color = RubyRoseSoft
+                    )
 
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(OrosiSurfaceHigh)
-                            .border(1.dp, OrosiHairline, RoundedCornerShape(12.dp))
-                            .clickable {
-                                isConfirmOpen = false
-                                dragOffsetPx = 0f
-                            }
-                            .padding(horizontal = 10.dp, vertical = 8.dp)
-                            .testTag("cancel_swipe_delete_$transactionId")
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "انصراف",
-                            tint = OrosiOnSurfaceVariant,
-                            modifier = Modifier.size(15.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "انصراف",
-                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                            color = AlabasterSilk,
-                            maxLines = 1,
-                            softWrap = false
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(RubyRose)
+                                .border(1.dp, RubyRoseSoft, RoundedCornerShape(12.dp))
+                                .clickable {
+                                    isConfirmOpen = false
+                                    onConfirmDelete()
+                                }
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                                .testTag("confirm_swipe_delete_$transactionId")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.DeleteOutline,
+                                contentDescription = "حذف قطعی",
+                                tint = AlabasterSilk,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "حذف قطعی",
+                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.ExtraBold),
+                                color = AlabasterSilk,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(OrosiSurfaceContainer)
+                                .border(1.dp, OrosiHairline, RoundedCornerShape(12.dp))
+                                .clickable {
+                                    isConfirmOpen = false
+                                }
+                                .padding(horizontal = 10.dp, vertical = 8.dp)
+                                .testTag("cancel_swipe_delete_$transactionId")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "انصراف",
+                                tint = OrosiOnSurfaceVariant,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "انصراف",
+                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                color = AlabasterSilk,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
                     }
                 }
-            }
-        }
-
-        // Foreground card that slides horizontally in-place
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .graphicsLayer {
-                    translationX = animatedOffsetPx
-                }
-        ) {
-            content {
-                slideSign = -1f
-                isConfirmOpen = !isConfirmOpen
             }
         }
     }
@@ -1038,15 +998,20 @@ fun CalmTransactionCard(
                     lineHeight = 20.sp
                 ),
                 color = AlabasterSilk,
-                maxLines = 2,
+                maxLines = 3,
+                softWrap = true,
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = subtitleText,
-                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontSize = 11.5.sp,
+                    lineHeight = 17.sp
+                ),
                 color = OrosiOnSurfaceVariant,
-                maxLines = 1,
+                maxLines = 2,
+                softWrap = true,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.testTag("transaction_subtitle_${transaction.id}")
             )

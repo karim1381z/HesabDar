@@ -64,7 +64,7 @@ data class TransactionEntity(
                 cardInfo
                     .replace("کارت", "")
                     .replace("حساب", "")
-                    .replace(Regex("[۰-۹0-9]+"), "")
+                    .replace(digitsRegex, "")
                     .trim()
             }
             return if (candidate.isBlank() || candidate == "بانک" || candidate == "تراکنش صوتی") {
@@ -73,6 +73,10 @@ data class TransactionEntity(
                 candidate
             }
         }
+
+    companion object {
+        private val digitsRegex = Regex("[۰-۹0-9]+")
+    }
 
     val simpleSubtitle: String
         get() {

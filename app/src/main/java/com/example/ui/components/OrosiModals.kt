@@ -140,6 +140,7 @@ fun VoiceOverlayBottomSheet(
     onSpeechChange: (String) -> Unit,
     onManualAmountChange: (String) -> Unit = {},
     onPurposeChange: (String) -> Unit = {},
+    onTransactionTypeChange: (Boolean) -> Unit = {},
     onUpdateMultiItem: (index: Int, newTitle: String, newAmountStr: String) -> Unit = { _, _, _ -> },
     onSimulateVoiceRecord: () -> Unit,
     onConfirmVoiceEntry: () -> Unit,
@@ -484,6 +485,72 @@ fun VoiceOverlayBottomSheet(
 
             Spacer(modifier = Modifier.height(12.dp))
 
+            // 1.5 Transaction Direction Selector (Expense vs. Income) when adding a new voice transaction
+            if (targetTx == null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(OrosiSurfaceContainer)
+                        .border(1.dp, OrosiHairline, RoundedCornerShape(14.dp))
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    val isExpenseSelected = !voiceState.isIncome
+                    val isIncomeSelected = voiceState.isIncome
+
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (isExpenseSelected) RubyRose.copy(alpha = 0.30f) else Color.Transparent)
+                            .border(
+                                width = 1.dp,
+                                color = if (isExpenseSelected) RubyRoseSoft else Color.Transparent,
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                            .clickable { onTransactionTypeChange(false) }
+                            .padding(vertical = 9.dp, horizontal = 8.dp)
+                            .testTag("voice_tx_type_expense")
+                    ) {
+                        Text(
+                            text = "پرداختی (خرج)",
+                            style = MaterialTheme.typography.labelLarge.copy(
+                                fontWeight = if (isExpenseSelected) FontWeight.ExtraBold else FontWeight.Medium
+                            ),
+                            color = if (isExpenseSelected) RubyRoseSoft else OrosiOnSurfaceVariant
+                        )
+                    }
+
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (isIncomeSelected) NishapurTurquoiseDeep else Color.Transparent)
+                            .border(
+                                width = 1.dp,
+                                color = if (isIncomeSelected) NishapurTurquoiseBright else Color.Transparent,
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                            .clickable { onTransactionTypeChange(true) }
+                            .padding(vertical = 9.dp, horizontal = 8.dp)
+                            .testTag("voice_tx_type_income")
+                    ) {
+                        Text(
+                            text = "دریافتی (واریز +)",
+                            style = MaterialTheme.typography.labelLarge.copy(
+                                fontWeight = if (isIncomeSelected) FontWeight.ExtraBold else FontWeight.Medium
+                            ),
+                            color = if (isIncomeSelected) NishapurTurquoiseSoft else OrosiOnSurfaceVariant
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+            }
+
             // 2. Single Clean Sentence/Description Field at the top:
             // "جمله یا توضیح تراکنش (مثلاً: ۷۰ تومن نانوایی)"
             OutlinedTextField(
@@ -802,6 +869,31 @@ fun VoiceOverlayBottomSheet(
                         text = "⚠️ عدم تطابق مبلغ با پیامک بانک: مبلغ گفته‌شده ($spokenFmt) با مبلغ پیامک بانک ($bankFmt) به اندازه $diffFmt اختلاف دارد. لطفاً مبلغ را اصلاح کنید تا ثبت فعال شود.",
                         style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
                         color = RubyRoseSoft
+                    )
+                }
+            }
+
+            if (targetTx == null && voiceState.hasSummaryTotalMismatch && voiceState.statedSummaryHeaderToman > 0L) {
+                val statedFmt = PersianNumberUtils.formatToman(voiceState.statedSummaryHeaderToman, showUnit = true)
+                val itemsSumFmt = PersianNumberUtils.formatToman(voiceState.totalAmountToman, showUnit = true)
+                val diffFmt = PersianNumberUtils.formatToman(
+                    kotlin.math.abs(voiceState.totalAmountToman - voiceState.statedSummaryHeaderToman),
+                    showUnit = true
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(SaffronGold.copy(alpha = 0.18f))
+                        .border(1.dp, SaffronGoldBright, RoundedCornerShape(14.dp))
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                        .testTag("voice_summary_total_mismatch_warning")
+                ) {
+                    Text(
+                        text = "⚠️ هشدار مغایرت سرجمع: در ابتدای جمله سرجمع را $statedFmt گفتید، اما جمع ریز موارد تفکیک‌شده $itemsSumFmt است ($diffFmt اختلاف). در صورت نیاز مبالغ بالا را ویرایش کنید.",
+                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                        color = SaffronGoldLight
                     )
                 }
             }
@@ -2855,7 +2947,7 @@ fun PaydayAndBackupBottomSheet(
                             color = AlabasterSilk
                         )
                         Text(
-                            text = "بررسی خودکار ۳۵ سناریوی صوتی پیچیده، پیامکی، تقویم و بانک‌ها بدون نیاز به تست دستی",
+                            text = "بررسی خودکار ۴۵ سناریوی صوتی پیچیده، پیامکی، تقویم و بانک‌ها بدون نیاز به تست دستی",
                             style = MaterialTheme.typography.labelSmall,
                             color = OrosiOnSurfaceVariant
                         )
@@ -2906,7 +2998,7 @@ fun PaydayAndBackupBottomSheet(
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = if (regressionReport == null) {
-                            "اجرای تست خودکار رگرسیون و استرس (۳۵ سناریو)"
+                            "اجرای تست خودکار رگرسیون و استرس (۴۵ سناریو)"
                         } else {
                             "اجرای مجدد تست استرس (${PersianNumberUtils.toPersianDigits(regressionReport!!.totalDurationMs.toString())} میلی‌ثانیه)"
                         },

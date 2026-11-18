@@ -51,7 +51,11 @@ data class VoiceUiState(
     val targetUntaggedTransaction: TransactionEntity? = null,
     val parsedMultiItems: List<ParsedVoiceExpense> = emptyList(),
     val hasBankAmountMismatch: Boolean = false,
-    val conflictingSpokenAmountToman: Long = 0L
+    val conflictingSpokenAmountToman: Long = 0L,
+    val isIncome: Boolean = false,
+    val hasUserOverriddenIncomeType: Boolean = false,
+    val hasSummaryTotalMismatch: Boolean = false,
+    val statedSummaryHeaderToman: Long = 0L
 )
 
 data class OrosiUiState(
@@ -466,6 +470,24 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    fun onVoiceTransactionTypeChanged(isIncome: Boolean) {
+        val current = _voiceState.value
+        val updatedMulti = current.parsedMultiItems.map { it.copy(isIncome = isIncome) }
+        val updatedPurpose = when {
+            isIncome && (current.purposeCategory.isBlank() || current.purposeCategory == "دریافت" || current.purposeCategory == "واریز") ->
+                if (current.recognizedText.contains("واریز")) "واریز وجه" else "دریافت وجه"
+            !isIncome && (current.purposeCategory == "دریافت وجه" || current.purposeCategory == "واریز وجه") ->
+                ""
+            else -> current.purposeCategory
+        }
+        _voiceState.value = current.copy(
+            isIncome = isIncome,
+            hasUserOverriddenIncomeType = true,
+            purposeCategory = updatedPurpose,
+            parsedMultiItems = updatedMulti
+        )
+    }
+
     fun onUpdateMultiVoiceItem(index: Int, newTitle: String, newAmountStr: String) {
         val currentList = _voiceState.value.parsedMultiItems.toMutableList()
         if (index !in currentList.indices) return
@@ -489,6 +511,14 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
         } else {
             null
         }
+        val summaryMismatch = if (targetTx == null) {
+            PersianVoiceSlangParserEngine.detectSpokenSummaryTotalMismatch(
+                rawSpeech = _voiceState.value.recognizedText,
+                multiItems = currentList
+            )
+        } else {
+            null
+        }
         _voiceState.value = _voiceState.value.copy(
             parsedMultiItems = currentList,
             purposeCategory = combinedNote,
@@ -496,7 +526,9 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
             userShareToman = newTotal,
             manualAmountText = PersianNumberUtils.formatToman(newTotal),
             hasBankAmountMismatch = mismatchAmount != null,
-            conflictingSpokenAmountToman = mismatchAmount ?: 0L
+            conflictingSpokenAmountToman = mismatchAmount ?: 0L,
+            hasSummaryTotalMismatch = summaryMismatch != null,
+            statedSummaryHeaderToman = summaryMismatch ?: 0L
         )
     }
 
@@ -539,6 +571,27 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
             null
         }
 
+        val summaryMismatchAmount = if (targetTx == null) {
+            PersianVoiceSlangParserEngine.detectSpokenSummaryTotalMismatch(
+                rawSpeech = speech,
+                multiItems = multiItems
+            )
+        } else {
+            null
+        }
+
+        val resolvedIsIncome = when {
+            targetTx != null -> targetTx.type == "INCOME"
+            _voiceState.value.hasUserOverriddenIncomeType -> _voiceState.value.isIncome
+            else -> parsed.isIncome
+        }
+
+        val effectiveMultiItems = if (multiItems.size > 1) {
+            multiItems.map { it.copy(isIncome = resolvedIsIncome) }
+        } else {
+            emptyList()
+        }
+
         _voiceState.value = _voiceState.value.copy(
             recognizedText = speech,
             manualAmountText = effectiveManualText,
@@ -550,9 +603,12 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
             dongFriendName = parsed.dongFriendName,
             userShareToman = effectiveUserShare,
             targetUntaggedTransaction = targetTx,
-            parsedMultiItems = if (multiItems.size > 1) multiItems else emptyList(),
+            parsedMultiItems = effectiveMultiItems,
             hasBankAmountMismatch = mismatchAmount != null,
-            conflictingSpokenAmountToman = mismatchAmount ?: 0L
+            conflictingSpokenAmountToman = mismatchAmount ?: 0L,
+            isIncome = resolvedIsIncome,
+            hasSummaryTotalMismatch = summaryMismatchAmount != null,
+            statedSummaryHeaderToman = summaryMismatchAmount ?: 0L
         )
     }
 
@@ -594,13 +650,15 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
 
             // Check if user has multi-clause items (including any inline edits made in the Voice Sheet)
             val activeMultiItems = if (v.parsedMultiItems.size > 1) {
-                v.parsedMultiItems.filter { it.totalAmountToman > 0L && it.purposeCategory.isNotBlank() }
+                v.parsedMultiItems
+                    .filter { it.totalAmountToman > 0L && it.purposeCategory.isNotBlank() }
+                    .map { it.copy(isIncome = v.isIncome) }
             } else {
                 PersianVoiceSlangParserEngine.parseMultiVoiceCommands(
                     rawSpeech = v.recognizedText,
                     defaultBankName = targetTx?.shortBankName ?: "نقدی / دستی",
                     fallbackTotalToman = targetTx?.totalAmountToman
-                )
+                ).map { it.copy(isIncome = v.isIncome) }
             }
 
             if (targetTx == null && activeMultiItems.size > 1) {
@@ -633,7 +691,9 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
                 targetTx != null && activeMultiItems.size > 1 ->
                     PersianVoiceSlangParserEngine.formatCombinedMultiVoiceNote(activeMultiItems)
                 v.purposeCategory.isNotBlank() -> v.purposeCategory.trim()
-                else -> parsedFromSpeech.purposeCategory.trim()
+                parsedFromSpeech.purposeCategory.isNotBlank() -> parsedFromSpeech.purposeCategory.trim()
+                v.isIncome -> "دریافت وجه"
+                else -> ""
             }
 
             if (finalPurpose.isBlank()) {
@@ -655,12 +715,15 @@ class OrosiViewModel(application: Application) : AndroidViewModel(application) {
                 dongAmountToman = safeDong,
                 userShareToman = finalUserShare,
                 storeName = targetTx?.shortBankName ?: parsedFromSpeech.merchant.ifBlank { "نقدی / دستی" },
-                cardLabel = targetTx?.cardInfo ?: "نقدی / دستی"
+                cardLabel = targetTx?.cardInfo ?: "نقدی / دستی",
+                isIncome = v.isIncome
             )
 
             repository.confirmVoiceExpense(finalParsed, targetTx?.id)
             val msg = if (finalParsed.dongAmountToman > 0L && finalParsed.dongFriendName.isNotBlank()) {
                 "ثبت شد! «${finalParsed.purposeCategory}» — فقط سهم شما (${PersianNumberUtils.formatToman(finalParsed.userShareToman, true)}) کسر شد."
+            } else if (finalParsed.isIncome) {
+                "واریزی «${finalParsed.purposeCategory}» (${PersianNumberUtils.formatIncomeToman(finalTotalAmount, true)}) ثبت شد ✓"
             } else {
                 "تراکنش با عنوان «${finalParsed.purposeCategory}» (${PersianNumberUtils.formatToman(finalTotalAmount, true)}) ثبت شد ✓"
             }

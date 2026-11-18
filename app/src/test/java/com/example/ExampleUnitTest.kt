@@ -533,6 +533,35 @@ class ExampleUnitTest {
     }
 
     @Test
+    fun testVideo88BatchAndBatch14VoiceAndIncomeScenarios() {
+        // 1. Video 88batch (00:21): "سلام امروز ۵۰ هزار تومان خرج کردم که ۲۵ تومنش برای موز بود و ۳۵ تومنش برای بستنی"
+        val phraseSummaryMismatch = "سلام امروز ۵۰ هزار تومان خرج کردم که ۲۵ تومنش برای موز بود و ۳۵ تومنش برای بستنی"
+        val itemsMismatch = PersianVoiceSlangParserEngine.parseMultiVoiceCommands(phraseSummaryMismatch)
+        assertEquals(2, itemsMismatch.size)
+        assertEquals("موز", itemsMismatch[0].purposeCategory)
+        assertEquals(25_000L, itemsMismatch[0].totalAmountToman)
+        assertEquals("بستنی", itemsMismatch[1].purposeCategory)
+        assertEquals(35_000L, itemsMismatch[1].totalAmountToman)
+        assertEquals(
+            50_000L,
+            PersianVoiceSlangParserEngine.detectSpokenSummaryTotalMismatch(phraseSummaryMismatch, itemsMismatch)
+        )
+
+        // 2. Video 88batch (00:43): "سلام ۲۵ تومن می‌خواستم خرج کنم ولی ۲۰ تومن خرج کردم برای یک موز"
+        val phraseWantBut = "سلام ۲۵ تومن می‌خواستم خرج کنم ولی ۲۰ تومن خرج کردم برای یک موز"
+        val itemsWantBut = PersianVoiceSlangParserEngine.parseMultiVoiceCommands(phraseWantBut)
+        assertEquals(1, itemsWantBut.size)
+        assertEquals("۱ موز", itemsWantBut[0].purposeCategory)
+        assertEquals(20_000L, itemsWantBut[0].totalAmountToman)
+
+        // 3. Video 88batch_14 (00:02): "۵۰ هزار تومان دریافت کردم" -> Income (isIncome = true)
+        val received50 = PersianVoiceSlangParserEngine.parseVoiceCommand("۵۰ هزار تومان دریافت کردم")
+        assertEquals(true, received50.isIncome)
+        assertEquals("دریافت وجه", received50.purposeCategory)
+        assertEquals(50_000L, received50.totalAmountToman)
+    }
+
+    @Test
     fun testFullOrosiRegressionAndStressSuitePasses100Percent() {
         val report = com.example.domain.OrosiRegressionSuite.runFullRegressionAndStressSuite()
         for (r in report.results) {
@@ -543,8 +572,8 @@ class ExampleUnitTest {
             )
         }
         assertEquals(true, report.allPassed)
-        assertEquals(40, report.totalCount)
-        assertEquals(40, report.passedCount)
+        assertEquals(45, report.totalCount)
+        assertEquals(45, report.passedCount)
     }
 }
 

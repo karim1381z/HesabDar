@@ -954,7 +954,8 @@ data class ParsedVoiceExpense(
     val purposeCategory: String,
     val cardLabel: String,
     val category: String = "خوراکی و روزمره",
-    val merchant: String = ""
+    val merchant: String = "",
+    val isIncome: Boolean = false
 ) {
     val title: String
         get() = purposeCategory
@@ -1064,6 +1065,16 @@ object PersianVoiceSlangParserEngine {
         "پرداخت کردم",
         "کارت کشیدم",
         "واریز کردم",
+        "دریافت کردم",
+        "دریافت شد",
+        "واریز شد",
+        "به حسابم اومد",
+        "به حسابم آمد",
+        "به حسابم نشست",
+        "به کارتم ریخت",
+        "به کارتم زد",
+        "بهم داد",
+        "به من داد",
         "خرید کردم",
         "خرج کردم",
         "پول دادم",
@@ -1512,12 +1523,23 @@ object PersianVoiceSlangParserEngine {
         return ProtectedQuantitiesText(text, replacements)
     }
 
-    fun inferExpenseCategory(title: String): String {
+    private val incomeSpeechRegex = Regex(
+        """(?<=^|\s)(?:دریافت\s+کردم|دریافت\s+شد|دریافتی|دریافت\s+وجه|واریز\s+شد|واریزی|واریز\s+به\s+حساب|واریز\s+حقوق|(?:حقوق|پاداش|عیدی|سود|هدیه|جایزه|کارانه|پورسانت)(?:\s+[^\s]+){0,2}\s+گرفتم|فروختم|بهم\s+داد|به\s+من\s+داد|به\s+حسابم\s+اومد|به\s+حسابم\s+آمد|به\s+حسابم\s+نشست|به\s+کارتم\s+ریخت|به\s+کارتم\s+زد|درآمد|طلبم\s+رو\s+داد|طلبم\s+را\s+داد|قرضم\s+رو\s+پس\s+داد|پس\s+گرفتم)(?=\s|$)|(?<=^|\s)(?:دریافت|واریز)$"""
+    )
+
+    fun detectVoiceTransactionIsIncome(rawSpeech: String): Boolean {
+        val norm = PersianNumberUtils.normalizePersianText(rawSpeech.trim())
+        if (norm.isBlank()) return false
+        return incomeSpeechRegex.containsMatchIn(norm)
+    }
+
+    fun inferExpenseCategory(title: String, isIncome: Boolean = false): String {
+        if (isIncome) return "درآمد و واریزی"
         val t = PersianNumberUtils.normalizePersianText(title)
         return when {
             listOf("شارژ", "ایرانسل", "همراه اول", "رایتل", "اینترنت", "قبض", "برق", "آب", "گاز", "تلفن", "شاتل", "آسیاتک", "هاست").any { t.contains(it) } ->
                 "قبض و شارژ"
-            listOf("نانوایی", "نونوایی", "نان", "نون", "میوه", "سیب‌زمینی", "سیب زمینی", "بستنی", "گوشت", "مرغ", "پفک", "تنقلات", "سوپرمارکت", "ماست", "شیر", "خوراکی", "غذا", "رستوران", "کافه", "شام", "ناهار", "صبحانه").any { t.contains(it) } ->
+            listOf("نانوایی", "نونوایی", "نان", "نون", "میوه", "موز", "سیب‌زمینی", "سیب زمینی", "بستنی", "گوشت", "مرغ", "پفک", "تنقلات", "سوپرمارکت", "ماست", "شیر", "خوراکی", "غذا", "رستوران", "کافه", "شام", "ناهار", "صبحانه").any { t.contains(it) } ->
                 "خوراکی و روزمره"
             listOf("دمپایی", "کفش", "لباس", "مانتو", "شلوار", "پوشاک", "پیراهن").any { t.contains(it) } ->
                 "پوشاک و خرید"
@@ -1628,7 +1650,65 @@ object PersianVoiceSlangParserEngine {
         return trimLeadingPrepositionsAndVav(result)
     }
 
-    private fun pivotNarrativeIntroKeepingAmount(rawText: String): String {
+    private val softCancelWantButSplitRegex = Regex(
+        """^(.*?(?<=^|\s)(?:میخواستم|می‌خواستم|میخواهم|میخوام)(?=\s|$).*?)\s+(?:ولی|اما)(?!\s+(?:نه|ندادم|نکردم|نخریدم|نگرفتم|نزدم|نشد|پشیمون|پشیمان|منصرف|کنسل|لغو)(?=\s|$))\s+(.+)$"""
+    )
+
+    /**
+     * Resolves soft-cancelled "می‌خواستم ... ولی <actual clause>" patterns BEFORE narrative intro pivoting
+     * so that sentences like:
+     * - "سلام ۲۵ تومن می‌خواستم خرج کنم ولی ۲۰ تومن خرج کردم برای یک موز" -> "۲۰ تومن خرج کردم برای یک موز" (20,000 Tomans, not 25,000!)
+     * - "سلام رفتم بیرون اومدم بعد یادمه که برای دوتا بستنی می‌خواستم ۳۹ تومن بدم ولی ۴۹ تومن دادم" -> "۲ تا بستنی ۴۹ تومن دادم"
+     */
+    fun resolveSoftCancelledWantButClauses(rawText: String): String {
+        val normalized = PersianNumberUtils.normalizePersianText(rawText.trim())
+        if (!normalized.contains("میخواستم") && !normalized.contains("می‌خواستم") &&
+            !normalized.contains("میخواهم") && !normalized.contains("میخوام")
+        ) {
+            return normalized
+        }
+        val match = softCancelWantButSplitRegex.find(normalized) ?: return normalized
+        val rawBeforeBut = match.groupValues[1].trim()
+        val rawAfterBut = match.groupValues[2].trim()
+        if (rawAfterBut.isBlank() || hasHardNegationMarker(rawAfterBut)) return normalized
+
+        // Check if rawBeforeBut contains an earlier independent clause separated by " و " before the "می‌خواستم" part
+        var preservedLeadingClause = ""
+        var cancelledSegment = rawBeforeBut
+        if (rawBeforeBut.contains(" و ")) {
+            val lastVavIdx = rawBeforeBut.lastIndexOf(" و ")
+            val beforeVav = rawBeforeBut.substring(0, lastVavIdx).trim()
+            val afterVav = rawBeforeBut.substring(lastVavIdx + 3).trim()
+            if (Regex("""(?<=^|\s)(?:میخواستم|می‌خواستم|میخواهم|میخوام)(?=\s|$)""").containsMatchIn(afterVav)) {
+                val probeBeforeVav = parseSingleVoiceClause(beforeVav, null, "نقدی / دستی")
+                if (probeBeforeVav.totalAmountToman > 0L && probeBeforeVav.purposeCategory.isNotBlank()) {
+                    preservedLeadingClause = beforeVav
+                    cancelledSegment = afterVav
+                }
+            }
+        }
+
+        val afterAmount = parseSpokenPersianAmountToman(rawAfterBut)
+        if (afterAmount <= 0L) return normalized
+
+        val subjectFromCancelled = extractSubjectFromSoftCancelledClause(cancelledSegment)
+        val afterPivotProbe = pivotNarrativeIntroKeepingAmountInternal(rawAfterBut)
+        val afterParsed = parseSingleVoiceClause(afterPivotProbe, null, "نقدی / دستی")
+
+        val resolvedTail = if (afterParsed.purposeCategory.isNotBlank() || subjectFromCancelled.isBlank()) {
+            rawAfterBut
+        } else {
+            "$subjectFromCancelled $rawAfterBut"
+        }
+
+        return if (preservedLeadingClause.isNotBlank()) {
+            "$preservedLeadingClause و $resolvedTail"
+        } else {
+            resolvedTail
+        }
+    }
+
+    private fun pivotNarrativeIntroKeepingAmountInternal(rawText: String): String {
         val cleaned = PersianNumberUtils.normalizePersianText(rawText.trim())
         val pivotRegex = Regex("""^(.*?)(?<=^|\s)(?:برای|بابتِ|بابت|واسه)(?=\s|$)\s*(.+)$""")
         val match = pivotRegex.find(cleaned) ?: return trimLeadingPrepositionsAndVav(cleaned)
@@ -1637,20 +1717,35 @@ object PersianVoiceSlangParserEngine {
         val rightRaw = trimLeadingPrepositionsAndVav(match.groupValues[2].trim())
         if (rightRaw.isBlank()) return trimLeadingPrepositionsAndVav(cleaned)
 
-        val hasNarrativeIntroOnLeft = narrativeIntroTriggerWords.any { marker ->
-            Regex("""(?<=^|\s)$marker(?=\s|$)""").containsMatchIn(leftRaw)
+        // Never pivot across a "که" breakdown or when the left side has "تومنش"/"تومانش"
+        if (leftRaw.contains("که") || leftRaw.contains("تومنش") || leftRaw.contains("تومانش")) {
+            return trimLeadingPrepositionsAndVav(cleaned)
         }
+
+        val hasNarrativeIntroOnLeft = precompiledNarrativeIntroRegex.containsMatchIn(leftRaw)
         if (!hasNarrativeIntroOnLeft) {
             return trimLeadingPrepositionsAndVav(cleaned)
         }
 
         val leftAmount = parseSpokenPersianAmountToman(leftRaw)
         val rightAmount = parseSpokenPersianAmountToman(rightRaw)
-        return if (leftAmount > 0L && rightAmount == 0L) {
-            "${leftAmount / 1000L} هزار تومان $rightRaw"
-        } else {
-            rightRaw
+        return when {
+            leftAmount > 0L && rightAmount == 0L -> {
+                val amtStr = if (leftAmount >= 1_000L && leftAmount % 1_000L == 0L) {
+                    "${leftAmount / 1_000L} هزار تومان"
+                } else {
+                    "${leftAmount * 10L} ریال"
+                }
+                "$amtStr $rightRaw"
+            }
+            leftAmount == 0L -> rightRaw
+            else -> trimLeadingPrepositionsAndVav(cleaned)
         }
+    }
+
+    private fun pivotNarrativeIntroKeepingAmount(rawText: String): String {
+        val softResolved = resolveSoftCancelledWantButClauses(rawText)
+        return pivotNarrativeIntroKeepingAmountInternal(softResolved)
     }
 
     /**
@@ -1701,7 +1796,7 @@ object PersianVoiceSlangParserEngine {
         val tokens = textWithoutQtyPlaceholders
             .replace("،", " ")
             .replace(".", " ")
-            .split(Regex("""\s+"""))
+            .split(whitespaceRegex)
             .filter { it.isNotBlank() }
 
         var maxSpokenAmount = 0L
@@ -1820,12 +1915,14 @@ object PersianVoiceSlangParserEngine {
         "نمی‌خواستم"
     )
 
+    private val precompiledHardNegationRegex = Regex(
+        """(?<=^|\s)(?:${negationAndCancellationMarkers.joinToString("|")})(?=\s|$)"""
+    )
+
     private fun hasHardNegationMarker(clause: String): Boolean {
         val norm = PersianNumberUtils.normalizePersianText(clause.trim())
         if (norm.isBlank()) return false
-        return negationAndCancellationMarkers.any { marker ->
-            Regex("""(?<=^|\s)$marker(?=\s|$)""").containsMatchIn(norm)
-        }
+        return precompiledHardNegationRegex.containsMatchIn(norm)
     }
 
     /**
@@ -1849,8 +1946,8 @@ object PersianVoiceSlangParserEngine {
      */
     private fun extractSubjectFromSoftCancelledClause(cancelledClause: String): String {
         val stripped = PersianNumberUtils.normalizePersianText(cancelledClause)
-            .replace(Regex("""(?<=^|\s)(?:میخواستم|می‌خواستم|میخواهم|میخوام|بدم|بخرم|بگیرم|ولی|اما)(?=\s|$)"""), " ")
-            .replace(Regex("""\s+"""), " ")
+            .replace(Regex("""(?<=^|\s)(?:میخواستم|می‌خواستم|میخواهم|میخوام|خرج\s+کنم|بدم|بخرم|بگیرم|کنم|ولی|اما)(?=\s|$)"""), " ")
+            .replace(whitespaceRegex, " ")
             .trim()
         if (stripped.isBlank()) return ""
         return parseSingleVoiceClause(stripped, null, "نقدی / دستی").purposeCategory
@@ -1975,7 +2072,8 @@ object PersianVoiceSlangParserEngine {
     private fun extractCandidateSubClauses(cleaned: String): List<String> {
         val obsResolved = resolveObservationClausesAndBackReferences(cleaned)
         val selfCorrected = resolveMidSpeechSelfCorrections(obsResolved)
-        val normalized = stripMentalMathChains(selfCorrected)
+        val softResolved = resolveSoftCancelledWantButClauses(selfCorrected)
+        val normalized = stripMentalMathChains(softResolved)
 
         // Protect " و " inside compound Persian numbers (e.g. "سی و نه", "بیست و پنج", "یک میلیون و دویست")
         val prefixPattern = compoundMoneyPrefixWords.sortedByDescending { it.length }.joinToString("|")
@@ -1988,9 +2086,22 @@ object PersianVoiceSlangParserEngine {
             }
         }
 
+        // Also split on " که " when it introduces an itemized breakdown (e.g. "امروز ۵۰ هزار تومان خرج کردم که ۲۵ تومنش برای موز بود و ۳۵ تومنش برای بستنی")
+        val splitPattern = if (!protectedCompoundNums.contains("دنگ") &&
+            !protectedCompoundNums.contains("دُنگ") &&
+            !protectedCompoundNums.contains("سهم")
+        ) {
+            Regex("""(?:\s+و\s+|،|\s+که\s+(?=[۰-۹0-9]|(?:$numWordsPattern)(?=\s|$)))""")
+        } else {
+            Regex("""(?:\s+و\s+|،)""")
+        }
+
         val byConjOrComma = protectedCompoundNums
-            .split(Regex("""(?:\s+و\s+|،)"""))
-            .map { resolveMidSpeechSelfCorrections(it.replace("⟪NUMVAV⟫", " و ").trim()) }
+            .split(splitPattern)
+            .map {
+                val restored = it.replace("⟪NUMVAV⟫", " و ").trim()
+                resolveSoftCancelledWantButClauses(resolveMidSpeechSelfCorrections(restored))
+            }
             .filter { it.isNotBlank() }
 
         val afterAsyndetic = mutableListOf<String>()
@@ -2026,7 +2137,7 @@ object PersianVoiceSlangParserEngine {
         return PersianNumberUtils.normalizePersianText(title)
             .replace("نونوایی", "نانوایی")
             .replace("نون", "نان")
-            .replace(Regex("""\s+"""), " ")
+            .replace(whitespaceRegex, " ")
             .trim()
     }
 
@@ -2052,7 +2163,6 @@ object PersianVoiceSlangParserEngine {
         if (fallbackTotalToman != null && fallbackTotalToman > 0L) {
             val currentSum = items.sumOf { it.totalAmountToman }
             if (currentSum != fallbackTotalToman) {
-                // Try demoting individual items or any combination of demotable items to match fallbackTotalToman
                 for (i in items.indices) {
                     if (canDemoteToSubThousand[i]) {
                         val literalToman = items[i].totalAmountToman / 1_000L
@@ -2105,6 +2215,57 @@ object PersianVoiceSlangParserEngine {
             }
         }
         return collapsed
+    }
+
+    private val summaryHeaderRegex = Regex(
+        """(?<=^|\s)(?:کلاً|کلا|جمعاً|جمعا|مجموعاً|مجموعا|سرجمع|خرج\s+کردم|خرید\s+کردم|پول\s+دادم|کارت\s+کشیدم|پرداخت\s+کردم)(?=\s|$)"""
+    )
+
+    /**
+     * Extracts the stated summary header total at the start of a multi-item voice utterance
+     * (e.g. `50,000` in `"سلام امروز ۵۰ هزار تومان خرج کردم که ۲۵ تومنش برای موز بود و ۳۵ تومنش برای بستنی"`
+     * or `"رفتم بیرون کلاً ۵۰ هزار تومان خرج کردم ۲۵ تومن بستنی ۲۵ تومن دمپایی"`), or `null` if no summary header was spoken.
+     */
+    fun extractSpokenSummaryHeaderTotalToman(rawSpeech: String): Long? {
+        val rawCleaned = stripStumbledNumbers(PersianNumberUtils.normalizePersianText(rawSpeech.trim()))
+        if (rawCleaned.isBlank()) return null
+        if (rawCleaned.contains("که") && (rawCleaned.contains("دنگ") || rawCleaned.contains("دُنگ") || rawCleaned.contains("سهم"))) {
+            return null
+        }
+        val cleaned = pivotNarrativeIntroKeepingAmount(rawCleaned)
+        val rawCandidateParts = extractCandidateSubClauses(cleaned)
+        if (rawCandidateParts.size < 2) return null
+
+        val firstRaw = rawCandidateParts.first()
+        if (!summaryHeaderRegex.containsMatchIn(firstRaw)) return null
+        val firstProbe = parseSingleVoiceClause(firstRaw, null, "نقدی / دستی")
+        if (firstProbe.totalAmountToman <= 0L || firstProbe.purposeCategory.isNotBlank()) return null
+
+        val restHaveItemWithAmount = rawCandidateParts.drop(1).any { part ->
+            val p = parseSingleVoiceClause(part, null, "نقدی / دستی")
+            p.totalAmountToman > 0L && p.purposeCategory.isNotBlank()
+        }
+        return if (restHaveItemWithAmount) firstProbe.totalAmountToman else null
+    }
+
+    /**
+     * Detects if the user stated a summary header total at the beginning of the sentence (e.g. "امروز ۵۰ هزار تومان خرج کردم که...")
+     * that conflicts with the sum of the itemized breakdown (e.g. "۲۵ تومنش برای موز بود و ۳۵ تومنش برای بستنی" = 60,000 Tomans).
+     * Returns the stated summary header amount in Tomans (e.g. `50,000L`) if there is a mismatch, or `null` if they match or no summary header was spoken.
+     */
+    fun detectSpokenSummaryTotalMismatch(
+        rawSpeech: String,
+        multiItems: List<ParsedVoiceExpense> = emptyList()
+    ): Long? {
+        val statedSummaryHeader = extractSpokenSummaryHeaderTotalToman(rawSpeech) ?: return null
+        val items = if (multiItems.isNotEmpty()) {
+            multiItems
+        } else {
+            parseMultiVoiceCommands(rawSpeech)
+        }
+        if (items.size < 2) return null
+        val itemsSum = items.sumOf { it.totalAmountToman }
+        return if (itemsSum > 0L && itemsSum != statedSummaryHeader) statedSummaryHeader else null
     }
 
     /**
@@ -2197,12 +2358,9 @@ object PersianVoiceSlangParserEngine {
             return emptyList()
         }
 
-        // Check if the first clause is a Summary Intro Header (e.g. "اومدم کلاً ۵۰ هزار تومان خرج کردم")
+        // Check if the first clause is a Summary Intro Header (e.g. "اومدم کلاً ۵۰ هزار تومان خرج کردم" or "سلام امروز ۵۰ هزار تومان خرج کردم")
         // followed by itemized sub-clauses ("۲۵ تومن بستنی", "۲۵ تومن دمپایی").
         // Must contain an explicit summary/spending marker so compound numbers like "یک میلیون و دویست هزار تومان خرید گوشت" are preserved!
-        val summaryHeaderRegex = Regex(
-            """(?<=^|\s)(?:کلاً|کلا|جمعاً|جمعا|مجموعاً|مجموعا|سرجمع|خرج\s+کردم|خرید\s+کردم|پول\s+دادم|کارت\s+کشیدم|پرداخت\s+کردم)(?=\s|$)"""
-        )
         var summaryHeaderAmount: Long? = null
         val activeCandidateParts = if (nonEmptyCandidateParts.size >= 2) {
             val firstRaw = nonEmptyCandidateParts.first()
@@ -2329,6 +2487,7 @@ object PersianVoiceSlangParserEngine {
     ): ParsedVoiceExpense {
         val cleaned = PersianNumberUtils.normalizePersianText(rawSpeech.trim())
         val isTaggingExistingSms = fallbackTotalToman != null && fallbackTotalToman > 0L
+        val detectedIncome = !isTaggingExistingSms && detectVoiceTransactionIsIncome(cleaned)
 
         val multiItems = parseMultiVoiceCommands(cleaned, defaultBankName, fallbackTotalToman)
         if (multiItems.size > 1) {
@@ -2345,11 +2504,13 @@ object PersianVoiceSlangParserEngine {
                     purposeCategory = combinedNote,
                     cardLabel = "کارت $effectiveBank",
                     category = multiItems.first().category,
-                    merchant = multiItems.first().merchant
+                    merchant = multiItems.first().merchant,
+                    isIncome = false
                 )
             } else {
                 val sumAmount = multiItems.sumOf { it.totalAmountToman }
                 val combinedNote = formatCombinedMultiVoiceNote(multiItems)
+                val anyIncome = detectedIncome || multiItems.any { it.isIncome }
                 return ParsedVoiceExpense(
                     recognizedSpeech = cleaned,
                     totalAmountToman = sumAmount,
@@ -2359,8 +2520,9 @@ object PersianVoiceSlangParserEngine {
                     storeName = defaultBankName.ifBlank { "نقدی / دستی" },
                     purposeCategory = combinedNote,
                     cardLabel = "نقدی / دستی",
-                    category = multiItems.first().category,
-                    merchant = multiItems.first().merchant
+                    category = if (anyIncome) "درآمد و واریزی" else multiItems.first().category,
+                    merchant = multiItems.first().merchant,
+                    isIncome = anyIncome
                 )
             }
         }
@@ -2373,7 +2535,8 @@ object PersianVoiceSlangParserEngine {
                     totalAmountToman = fallbackTotalToman!!,
                     userShareToman = (fallbackTotalToman - single.dongAmountToman).coerceAtLeast(0L),
                     storeName = effectiveBank,
-                    cardLabel = "کارت $effectiveBank"
+                    cardLabel = "کارت $effectiveBank",
+                    isIncome = false
                 )
             } else {
                 single
@@ -2389,7 +2552,8 @@ object PersianVoiceSlangParserEngine {
                 dongFriendName = "",
                 storeName = defaultBankName,
                 purposeCategory = "",
-                cardLabel = "نقدی / دستی"
+                cardLabel = "نقدی / دستی",
+                isIncome = detectedIncome
             )
         }
 
@@ -2415,8 +2579,11 @@ object PersianVoiceSlangParserEngine {
         fallbackTotalToman: Long? = null,
         defaultBankName: String = "نقدی / دستی"
     ): ParsedVoiceExpense {
-        val cleaned = stripStumbledNumbers(PersianNumberUtils.normalizePersianText(rawSpeech.trim()))
+        val cleaned = pivotNarrativeIntroKeepingAmountInternal(
+            stripStumbledNumbers(PersianNumberUtils.normalizePersianText(rawSpeech.trim()))
+        )
         val isTaggingExistingSms = fallbackTotalToman != null && fallbackTotalToman > 0L
+        val isIncomeClause = !isTaggingExistingSms && detectVoiceTransactionIsIncome(rawSpeech)
 
         val speechBeforeDong = if (cleaned.contains("که") && (cleaned.contains("دنگ") || cleaned.contains("دُنگ") || cleaned.contains("سهم"))) {
             cleaned.substringBefore("که").trim()
@@ -2538,10 +2705,19 @@ object PersianVoiceSlangParserEngine {
             }
         }
 
-        val purposeCategory = trimLeadingPrepositionsAndVav(rawPurposeCategory)
+        val cleanedPurpose = trimLeadingPrepositionsAndVav(rawPurposeCategory)
+        val purposeCategory = if (isIncomeClause) {
+            when (cleanedPurpose) {
+                "", "دریافت", "دریافتی" -> if (rawSpeech.contains("واریز")) "واریز وجه" else "دریافت وجه"
+                "واریز", "واریزی" -> "واریز وجه"
+                else -> cleanedPurpose
+            }
+        } else {
+            cleanedPurpose
+        }
         val safeDongAmount = dongAmount.coerceIn(0L, totalToman)
         val userShare = (totalToman - safeDongAmount).coerceAtLeast(0L)
-        val category = inferExpenseCategory(purposeCategory)
+        val category = inferExpenseCategory(purposeCategory, isIncome = isIncomeClause)
 
         return ParsedVoiceExpense(
             recognizedSpeech = cleaned,
@@ -2553,7 +2729,8 @@ object PersianVoiceSlangParserEngine {
             purposeCategory = purposeCategory,
             cardLabel = cardLabel,
             category = category,
-            merchant = detectedBrand
+            merchant = detectedBrand,
+            isIncome = isIncomeClause
         )
     }
 

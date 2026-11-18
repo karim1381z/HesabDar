@@ -349,7 +349,8 @@ fun OrosiFinanceApp(
                             onUntaggedMicClick = { tx ->
                                 viewModel.openVoiceForUntaggedTransaction(tx)
                             },
-                            onDeleteTransaction = { tx -> viewModel.deleteTransaction(tx) }
+                            onDeleteTransaction = { tx -> viewModel.deleteTransaction(tx) },
+                            onOpenTransactionsTab = { viewModel.navigateTo(OrosiScreen.TRANSACTIONS) }
                         )
                     }
 
@@ -448,6 +449,7 @@ fun OrosiFinanceApp(
             onSpeechChange = { viewModel.onVoiceSpeechChanged(it) },
             onManualAmountChange = { viewModel.onVoiceManualAmountChanged(it) },
             onPurposeChange = { viewModel.onVoicePurposeChanged(it) },
+            onTransactionTypeChange = { viewModel.onVoiceTransactionTypeChanged(it) },
             onUpdateMultiItem = { idx, title, amt ->
                 viewModel.onUpdateMultiVoiceItem(idx, title, amt)
             },

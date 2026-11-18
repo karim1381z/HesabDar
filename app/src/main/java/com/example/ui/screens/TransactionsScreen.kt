@@ -512,7 +512,8 @@ private fun JibemanGroupedTransactionRow(
                     lineHeight = 19.sp
                 ),
                 color = if (hasCustomNote) SaffronGoldLight else OrosiOnSurfaceVariant,
-                maxLines = 2,
+                maxLines = 3,
+                softWrap = true,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f)
             )
