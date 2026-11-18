@@ -40,11 +40,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalance
+import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Mic
@@ -555,62 +557,101 @@ fun VoiceOverlayBottomSheet(
                             )
                         }
 
-                        Row(
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(OrosiSurfaceContainer)
-                                .border(1.dp, OrosiHairline, RoundedCornerShape(12.dp))
-                                .padding(horizontal = 10.dp, vertical = 8.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(OrosiSurfaceLow)
+                                .border(1.dp, NishapurTurquoise.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
+                                .padding(horizontal = 12.dp, vertical = 10.dp)
                                 .testTag("multi_voice_item_$idx"),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.Bottom
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            OutlinedTextField(
-                                value = item.purposeCategory,
-                                onValueChange = { newTitle ->
-                                    onUpdateMultiItem(idx, newTitle, itemAmountField.text)
-                                },
-                                label = {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(22.dp)
+                                            .clip(CircleShape)
+                                            .background(NishapurTurquoiseDeep)
+                                            .border(1.dp, NishapurTurquoiseBright, CircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = PersianNumberUtils.toPersianDigits((idx + 1).toString()),
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.ExtraBold),
+                                            color = AlabasterSilk
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(6.dp))
                                     Text(
-                                        text = "عنوان مورد ${PersianNumberUtils.toPersianDigits((idx + 1).toString())}",
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                                        text = "تراکنش شماره ${PersianNumberUtils.toPersianDigits((idx + 1).toString())}",
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = NishapurTurquoiseSoft
                                     )
-                                },
-                                singleLine = true,
-                                modifier = Modifier
-                                    .weight(1.25f)
-                                    .testTag("multi_voice_item_title_$idx"),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = NishapurTurquoiseBright,
-                                    unfocusedBorderColor = OrosiHairline
+                                }
+                                Text(
+                                    text = PersianNumberUtils.formatToman(item.amountToman, showUnit = true),
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.ExtraBold),
+                                    color = SaffronGoldLight
                                 )
-                            )
+                            }
 
-                            OutlinedTextField(
-                                value = itemAmountField,
-                                onValueChange = { newVal ->
-                                    val formattedVal = formatAmountTextFieldValue(newVal)
-                                    itemAmountField = formattedVal
-                                    onUpdateMultiItem(idx, item.purposeCategory, formattedVal.text)
-                                },
-                                label = {
-                                    Text(
-                                        text = "مبلغ (تومان)",
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.Bottom
+                            ) {
+                                OutlinedTextField(
+                                    value = item.purposeCategory,
+                                    onValueChange = { newTitle ->
+                                        onUpdateMultiItem(idx, newTitle, itemAmountField.text)
+                                    },
+                                    label = {
+                                        Text(
+                                            text = "عنوان مورد ${PersianNumberUtils.toPersianDigits((idx + 1).toString())}",
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    },
+                                    singleLine = true,
+                                    modifier = Modifier
+                                        .weight(1.25f)
+                                        .testTag("multi_voice_item_title_$idx"),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = NishapurTurquoiseBright,
+                                        unfocusedBorderColor = OrosiHairline
                                     )
-                                },
-                                singleLine = true,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("multi_voice_item_amount_$idx"),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = SaffronGoldLight,
-                                    unfocusedBorderColor = OrosiHairline
                                 )
-                            )
+
+                                OutlinedTextField(
+                                    value = itemAmountField,
+                                    onValueChange = { newVal ->
+                                        val formattedVal = formatAmountTextFieldValue(newVal)
+                                        itemAmountField = formattedVal
+                                        onUpdateMultiItem(idx, item.purposeCategory, formattedVal.text)
+                                    },
+                                    label = {
+                                        Text(
+                                            text = "مبلغ (تومان)",
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    },
+                                    singleLine = true,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("multi_voice_item_amount_$idx"),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = SaffronGoldLight,
+                                        unfocusedBorderColor = OrosiHairline
+                                    )
+                                )
+                            }
                         }
                     }
 
@@ -1312,230 +1353,362 @@ fun TransactionDetailAndEditBottomSheet(
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // Top 4 Jibeman Badges: Direction (دریافتی / پرداختی), Bank (بلو, سپه...), Jalali Date (۲۲ آبان ۱۴۰۵), Time (۱۲:۲۱)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Badge 1: Direction
-                JibemanDetailBadge(
-                    text = if (isIncome) "دریافتی" else "پرداختی",
-                    bgColor = if (isIncome) NishapurTurquoiseDeep else RubyRose.copy(alpha = 0.25f),
-                    borderColor = if (isIncome) NishapurTurquoiseBright else RubyRoseSoft,
-                    textColor = if (isIncome) NishapurTurquoiseSoft else RubyRoseSoft
-                )
-                // Badge 2: Bank or Manual/Cash ("نقدی / دستی")
-                val bankBadgeLabel = if (transaction.shortBankName == "نقدی / دستی") {
-                    "نقدی / دستی"
-                } else {
-                    "بانک ${transaction.shortBankName}"
-                }
-                JibemanDetailBadge(
-                    text = bankBadgeLabel,
-                    bgColor = PersianLapis,
-                    borderColor = PersianLapisLight.copy(alpha = 0.5f),
-                    textColor = AlabasterSilk
-                )
-                // Badge 3: Jalali Date
-                JibemanDetailBadge(
-                    text = jalaliInfo.dateWithYear,
-                    bgColor = OrosiSurfaceHigh,
-                    borderColor = OrosiHairline,
-                    textColor = AlabasterSilk
-                )
-                // Badge 4: Time
-                JibemanDetailBadge(
-                    text = transaction.timeStr,
-                    bgColor = OrosiSurfaceHigh,
-                    borderColor = OrosiHairline,
-                    textColor = SaffronGoldLight
-                )
+            // Hero Summary Header Card: Bank Logo Avatar + Direction Badge + Large Amount + Unified Date/Time Pill
+            val livePreviewAmount = PersianNumberUtils.parseAmountInputToLong(amountField.text)
+                ?: transaction.totalAmountToman
+            val formattedHeroAmount = if (isIncome) {
+                PersianNumberUtils.formatIncomeToman(livePreviewAmount, showUnit = true)
+            } else {
+                PersianNumberUtils.formatToman(livePreviewAmount, showUnit = true)
+            }
+            val bankBadgeLabel = if (transaction.shortBankName == "نقدی / دستی") {
+                "نقدی / دستی"
+            } else {
+                "بانک ${transaction.shortBankName}"
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // 1) مبلغ (تومان) - Live 3-digit comma formatting with cursor at end
-            OutlinedTextField(
-                value = amountField,
-                onValueChange = { amountField = formatAmountTextFieldValue(it) },
-                label = { Text("مبلغ (تومان)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .testTag("detail_amount_input"),
-                singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = NishapurTurquoiseBright,
-                    unfocusedBorderColor = OrosiHairline
-                )
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // 2) مانده حساب پس از تراکنش (تومان) - Live 3-digit comma formatting with cursor at end
-            OutlinedTextField(
-                value = balanceAfterField,
-                onValueChange = { balanceAfterField = formatAmountTextFieldValue(it) },
-                label = { Text("مانده حساب پس از تراکنش (تومان)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                placeholder = { Text("مثلاً: ۹۸۴,۴۳۳") },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("detail_balance_after_input"),
-                singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = NishapurTurquoiseBright,
-                    unfocusedBorderColor = OrosiHairline
-                )
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // 3) توضیحات / بابت field with a direct Microphone button right inside the field
-            OutlinedTextField(
-                value = purposeStr,
-                onValueChange = { purposeStr = it },
-                label = { Text("توضیحات / بابت") },
-                placeholder = { Text("مثلاً: پفک، شارژ ایرانسل، نانوایی...") },
-                trailingIcon = {
-                    IconButton(
-                        onClick = { onQuickVoiceRetag(transaction) },
-                        modifier = Modifier
-                            .padding(end = 4.dp)
-                            .clip(CircleShape)
-                            .background(NishapurTurquoise)
-                            .size(36.dp)
-                            .testTag("sheet_voice_retag_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Mic,
-                            contentDescription = "ثبت صوتی بابت",
-                            tint = AlabasterSilk,
-                            modifier = Modifier.size(18.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                PersianLapis,
+                                OrosiSurfaceHigh
+                            )
                         )
+                    )
+                    .border(
+                        width = 1.dp,
+                        color = if (isIncome) NishapurTurquoiseBright.copy(alpha = 0.55f) else PersianLapisLight.copy(alpha = 0.45f),
+                        shape = RoundedCornerShape(20.dp)
+                    )
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        BankLogoAvatar(
+                            bankName = transaction.shortBankName,
+                            size = 44.dp
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = bankBadgeLabel,
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.ExtraBold),
+                                color = AlabasterSilk
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "${jalaliInfo.dateWithYear} • ساعت ${transaction.timeStr}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = OrosiOnSurfaceVariant
+                            )
+                        }
                     }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("detail_purpose_input"),
-                singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = NishapurTurquoiseBright,
-                    unfocusedBorderColor = OrosiHairline
-                )
-            )
 
-            // Collapsible "مشاهده متن اصلی پیامک بانک" ONLY if rawSmsBody is present (real bank SMS)
-            if (transaction.rawSmsBody.isNotBlank()) {
-                Spacer(modifier = Modifier.height(12.dp))
-                Column(
+                    JibemanDetailBadge(
+                        text = if (isIncome) "دریافتی" else "پرداختی",
+                        bgColor = if (isIncome) NishapurTurquoiseDeep else RubyRose.copy(alpha = 0.28f),
+                        borderColor = if (isIncome) NishapurTurquoiseBright else RubyRoseSoft,
+                        textColor = if (isIncome) NishapurTurquoiseSoft else RubyRoseSoft
+                    )
+                }
+
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
-                        .background(OrosiSurfaceContainer)
-                        .border(1.dp, OrosiHairline, RoundedCornerShape(14.dp))
+                        .background(OrosiSurfaceLow.copy(alpha = 0.65f))
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { showRawSms = !showRawSms }
-                            .padding(horizontal = 14.dp, vertical = 12.dp)
-                            .testTag("toggle_raw_sms_button"),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.Sms,
-                                contentDescription = null,
-                                tint = PersianLapisLight,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "مشاهده متن اصلی پیامک بانک",
-                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-                                color = PersianLapisLight
-                            )
-                        }
-                        Icon(
-                            imageVector = if (showRawSms) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                            contentDescription = null,
-                            tint = OrosiOnSurfaceVariant
-                        )
-                    }
-
-                    AnimatedVisibility(visible = showRawSms) {
-                        Text(
-                            text = transaction.rawSmsBody,
-                            style = MaterialTheme.typography.bodySmall.copy(lineHeight = 20.sp),
-                            color = AlabasterSilk,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp)
-                                .padding(bottom = 12.dp)
-                                .testTag("raw_sms_body_text")
-                        )
-                    }
+                    Text(
+                        text = formattedHeroAmount,
+                        style = MaterialTheme.typography.headlineSmall.copy(
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 22.sp
+                        ),
+                        color = if (isIncome) NishapurTurquoiseSoft else RubyRoseSoft,
+                        maxLines = 1,
+                        softWrap = false
+                    )
                 }
             }
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            Text(
-                text = "نشانه‌گذاری نوع تراکنش:",
-                style = MaterialTheme.typography.labelLarge,
-                color = OrosiOnSurfaceVariant
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            val modeOptions = listOf(
-                "NORMAL" to "خرج عادی",
-                "INSTALLMENT" to "وام و قسط",
-                "DONG" to "بدهی و طلب (دُنگ)"
-            )
-            Row(
+            // Section 1 Card: اطلاعات مالی تراکنش (Amount & Balance After)
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(OrosiSurfaceContainer)
+                    .border(1.dp, OrosiHairline, RoundedCornerShape(18.dp))
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                modeOptions.forEach { (modeKey, modeLabel) ->
-                    val isSelected = specialTagMode == modeKey
-                    val activeColor = when (modeKey) {
-                        "INSTALLMENT" -> RoyalAmethyst
-                        "DONG" -> NishapurTurquoise
-                        else -> PersianLapis
-                    }
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (isSelected) activeColor else OrosiSurfaceContainer)
-                            .border(
-                                1.dp,
-                                if (isSelected) Color.White.copy(alpha = 0.45f) else OrosiHairline,
-                                RoundedCornerShape(12.dp)
-                            )
-                            .clickable { specialTagMode = modeKey }
-                            .padding(horizontal = 12.dp, vertical = 8.dp)
-                            .testTag("tx_mode_toggle_$modeKey")
-                    ) {
-                        Text(
-                            text = modeLabel,
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                            color = AlabasterSilk,
-                            maxLines = 1,
-                            softWrap = false
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.AccountBalanceWallet,
+                        contentDescription = null,
+                        tint = NishapurTurquoiseBright,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "اطلاعات مالی تراکنش",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                        color = NishapurTurquoiseSoft
+                    )
+                }
+
+                // 1) مبلغ (تومان) - Live 3-digit comma formatting with cursor at end
+                OutlinedTextField(
+                    value = amountField,
+                    onValueChange = { amountField = formatAmountTextFieldValue(it) },
+                    label = { Text("مبلغ تراکنش (تومان)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("detail_amount_input"),
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = OrosiSurfaceLow,
+                        unfocusedContainerColor = OrosiSurfaceLow,
+                        focusedBorderColor = NishapurTurquoiseBright,
+                        unfocusedBorderColor = OrosiHairline
+                    )
+                )
+
+                // 2) مانده حساب پس از تراکنش (تومان) - Live 3-digit comma formatting with cursor at end
+                OutlinedTextField(
+                    value = balanceAfterField,
+                    onValueChange = { balanceAfterField = formatAmountTextFieldValue(it) },
+                    label = { Text("مانده حساب پس از تراکنش (تومان)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    placeholder = { Text("مثلاً: ۹۸۴,۴۳۳") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("detail_balance_after_input"),
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = OrosiSurfaceLow,
+                        unfocusedContainerColor = OrosiSurfaceLow,
+                        focusedBorderColor = NishapurTurquoiseBright,
+                        unfocusedBorderColor = OrosiHairline
+                    )
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Section 2 Card: توضیحات و مستندات پیامک (Purpose + Voice Retag + Collapsible Raw Bank SMS)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(OrosiSurfaceContainer)
+                    .border(1.dp, OrosiHairline, RoundedCornerShape(18.dp))
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = null,
+                            tint = SaffronGoldLight,
+                            modifier = Modifier.size(16.dp)
                         )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "توضیحات و بابت تراکنش",
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                            color = SaffronGoldLight
+                        )
+                    }
+                    Text(
+                        text = "قابل ویرایش متنی یا صوتی",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = OrosiOnSurfaceVariant
+                    )
+                }
+
+                // 3) توضیحات / بابت field with a direct Microphone button right inside the field
+                OutlinedTextField(
+                    value = purposeStr,
+                    onValueChange = { purposeStr = it },
+                    label = { Text("توضیحات / بابت") },
+                    placeholder = { Text("مثلاً: پفک، شارژ ایرانسل، نانوایی...") },
+                    trailingIcon = {
+                        IconButton(
+                            onClick = { onQuickVoiceRetag(transaction) },
+                            modifier = Modifier
+                                .padding(end = 4.dp)
+                                .clip(CircleShape)
+                                .background(NishapurTurquoise)
+                                .size(36.dp)
+                                .testTag("sheet_voice_retag_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Mic,
+                                contentDescription = "ثبت صوتی بابت",
+                                tint = AlabasterSilk,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("detail_purpose_input"),
+                    singleLine = false,
+                    maxLines = 2,
+                    shape = RoundedCornerShape(14.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = OrosiSurfaceLow,
+                        unfocusedContainerColor = OrosiSurfaceLow,
+                        focusedBorderColor = NishapurTurquoiseBright,
+                        unfocusedBorderColor = OrosiHairline
+                    )
+                )
+
+                // Collapsible "مشاهده متن اصلی پیامک بانک" ONLY if rawSmsBody is present (real bank SMS)
+                if (transaction.rawSmsBody.isNotBlank()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(OrosiSurfaceLow)
+                            .border(1.dp, PersianLapisLight.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { showRawSms = !showRawSms }
+                                .padding(horizontal = 14.dp, vertical = 11.dp)
+                                .testTag("toggle_raw_sms_button"),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Sms,
+                                    contentDescription = null,
+                                    tint = PersianLapisLight,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "مشاهده متن اصلی پیامک بانک",
+                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                                    color = PersianLapisLight
+                                )
+                            }
+                            Icon(
+                                imageVector = if (showRawSms) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = null,
+                                tint = OrosiOnSurfaceVariant
+                            )
+                        }
+
+                        AnimatedVisibility(visible = showRawSms) {
+                            Text(
+                                text = transaction.rawSmsBody,
+                                style = MaterialTheme.typography.bodySmall.copy(lineHeight = 20.sp),
+                                color = AlabasterSilk,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp)
+                                    .padding(bottom = 12.dp)
+                                    .testTag("raw_sms_body_text")
+                            )
+                        }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Section 3: Full-Width 3-Segment Pill Selector for Transaction Mode
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(OrosiSurfaceContainer)
+                    .border(1.dp, OrosiHairline, RoundedCornerShape(18.dp))
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "دسته‌بندی ماهیت تراکنش:",
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                    color = AlabasterSilk
+                )
+
+                val modeOptions = listOf(
+                    "NORMAL" to "خرج عادی",
+                    "INSTALLMENT" to "وام و قسط",
+                    "DONG" to "بدهی و دُنگ"
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(OrosiSurfaceLow)
+                        .border(1.dp, OrosiHairline, RoundedCornerShape(14.dp))
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    modeOptions.forEach { (modeKey, modeLabel) ->
+                        val isSelected = specialTagMode == modeKey
+                        val activeColor = when (modeKey) {
+                            "INSTALLMENT" -> RoyalAmethyst
+                            "DONG" -> NishapurTurquoise
+                            else -> PersianLapis
+                        }
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (isSelected) activeColor else Color.Transparent)
+                                .border(
+                                    width = if (isSelected) 1.dp else 0.dp,
+                                    color = if (isSelected) Color.White.copy(alpha = 0.45f) else Color.Transparent,
+                                    shape = RoundedCornerShape(10.dp)
+                                )
+                                .clickable { specialTagMode = modeKey }
+                                .padding(vertical = 9.dp, horizontal = 6.dp)
+                                .testTag("tx_mode_toggle_$modeKey"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = modeLabel,
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium
+                                ),
+                                color = if (isSelected) AlabasterSilk else OrosiOnSurfaceVariant,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
 
             Button(
                 onClick = {

@@ -688,6 +688,91 @@ object OrosiRegressionSuite {
             ok to "۱۰۰ پردازش پیچیده در ${PersianNumberUtils.toPersianDigits(elapsedMs.toString())} میلی‌ثانیه"
         }
 
+        // 36. Video 77batch_12: Observation clause ("دیدم") + back-reference ("سی سوتی را خریدم ۲۵ هزار تومان")
+        recordTest(
+            category = "تست استرس صوتی (ویدیو ۷۷_۱۲)",
+            title = "حذف بخش مشاهده («... دیدم») و ارجاع ضمیری به آیتم خریداری‌شده («سی سوتی را خریدم ۲۵ هزار تومان»)",
+            inputSummary = "رفتم بیرون یک سکه پارسیان ۲۰ سوتی و یک سکه پارسیان ۳۰ سوتی دیدم و سی سوتی را خریدم ۲۵ هزار تومان",
+            expectedSummary = "سکه پارسیان ۳۰ سوتی • ۲۵,۰۰۰ تومان (۱ تراکنش)"
+        ) {
+            val phrase = "رفتم بیرون یک سکه پارسیان ۲۰ سوتی و یک سکه پارسیان ۳۰ سوتی دیدم و سی سوتی را خریدم ۲۵ هزار تومان"
+            val items = PersianVoiceSlangParserEngine.parseMultiVoiceCommands(phrase)
+            val single = PersianVoiceSlangParserEngine.parseVoiceCommand(phrase)
+            val ok = items.size == 1 &&
+                items[0].purposeCategory == "سکه پارسیان ۳۰ سوتی" &&
+                items[0].totalAmountToman == 25_000L &&
+                single.purposeCategory == "سکه پارسیان ۳۰ سوتی" &&
+                single.totalAmountToman == 25_000L
+            ok to "${single.purposeCategory} • ${PersianNumberUtils.formatToman(single.totalAmountToman, true)} (${PersianNumberUtils.toPersianDigits(items.size.toString())} تراکنش)"
+        }
+
+        // 37. Video 77batch_12 (Google ASR contraction): "سی سوتی" transcribed as "سیتی" -> resolves to "سکه پارسیان ۳۰ سوتی"
+        recordTest(
+            category = "تست استرس صوتی (ویدیو ۷۷_۱۲)",
+            title = "اصلاح خطای شنیداری گوگل («سیتی» به جای «سی سوتی») با ارجاع به بافت جمله قبل از «دیدم»",
+            inputSummary = "رفتم بیرون یک سکه پارسیان ۲۰ سوتی و یک سکه پارسیان سی سوتی دیدم و سیتی را خریدم ۲۵ هزار تومان",
+            expectedSummary = "سکه پارسیان ۳۰ سوتی • ۲۵,۰۰۰ تومان (۱ تراکنش)"
+        ) {
+            val phrase = "رفتم بیرون یک سکه پارسیان ۲۰ سوتی و یک سکه پارسیان سی سوتی دیدم و سیتی را خریدم ۲۵ هزار تومان"
+            val items = PersianVoiceSlangParserEngine.parseMultiVoiceCommands(phrase)
+            val single = PersianVoiceSlangParserEngine.parseVoiceCommand(phrase)
+            val ok = items.size == 1 &&
+                items[0].purposeCategory == "سکه پارسیان ۳۰ سوتی" &&
+                items[0].totalAmountToman == 25_000L &&
+                single.purposeCategory == "سکه پارسیان ۳۰ سوتی" &&
+                single.totalAmountToman == 25_000L
+            ok to "${single.purposeCategory} • ${PersianNumberUtils.formatToman(single.totalAmountToman, true)} (${PersianNumberUtils.toPersianDigits(items.size.toString())} تراکنش)"
+        }
+
+        // 38. Video 77batch_13: Multi-stage price correction with "-ی" currency suffix ("ولی می‌خواستم ۲۰ تومنی بخرم ولی نه ۱۰۰ تومنی خریدم")
+        recordTest(
+            category = "تست استرس صوتی (ویدیو ۷۷_۱۳)",
+            title = "حفظ نام کالا در اصلاح چندمرحله‌ای قیمت با پسوند «تومنی» («... ولی می‌خواستم ۲۰ تومنی بخرم ولی نه ۱۰۰ تومنی خریدم»)",
+            inputSummary = "من رفتم بیرون و برگشتم ۵۰ هزار تومان دادم یه سکه پارسیان ۲۰ سوتی ولی می‌خواستم ۲۰ تومنی بخرم ولی نه ۱۰۰ تومنی خریدم",
+            expectedSummary = "سکه پارسیان ۲۰ سوتی • ۱۰۰,۰۰۰ تومان (۱ تراکنش)"
+        ) {
+            val phrase = "من رفتم بیرون و برگشتم ۵۰ هزار تومان دادم یه سکه پارسیان ۲۰ سوتی ولی می‌خواستم ۲۰ تومنی بخرم ولی نه ۱۰۰ تومنی خریدم"
+            val items = PersianVoiceSlangParserEngine.parseMultiVoiceCommands(phrase)
+            val single = PersianVoiceSlangParserEngine.parseVoiceCommand(phrase)
+            val ok = items.size == 1 &&
+                items[0].purposeCategory == "سکه پارسیان ۲۰ سوتی" &&
+                items[0].totalAmountToman == 100_000L &&
+                single.purposeCategory == "سکه پارسیان ۲۰ سوتی" &&
+                single.totalAmountToman == 100_000L
+            ok to "${single.purposeCategory} • ${PersianNumberUtils.formatToman(single.totalAmountToman, true)} (${PersianNumberUtils.toPersianDigits(items.size.toString())} تراکنش)"
+        }
+
+        // 39. Suffixed measurement units ("گیگی", "گرمی", "سوتی") alongside suffixed currency ("تومنی", "هزاری")
+        recordTest(
+            category = "موتور صوتی (NLU v5)",
+            title = "تفکیک پسوند یای نسبت روی واحدهای شمارش («۳۰ گیگی»، «۲۰۰ گرمی») از واحدهای پولی («۵۰ تومنی»، «۱۸۰ تومنی»)",
+            inputSummary = "۵۰ تومنی دادم به بسته اینترنت ۳۰ گیگی و ۲۰۰ گرمی گردو خریدم ۱۸۰ تومنی",
+            expectedSummary = "بسته اینترنت ۳۰ گیگی (۵۰,۰۰۰) + ۲۰۰ گرمی گردو (۱۸۰,۰۰۰)"
+        ) {
+            val items = PersianVoiceSlangParserEngine.parseMultiVoiceCommands(
+                "۵۰ تومنی دادم به بسته اینترنت ۳۰ گیگی و ۲۰۰ گرمی گردو خریدم ۱۸۰ تومنی"
+            )
+            val ok = items.size == 2 &&
+                items[0].purposeCategory == "بسته اینترنت ۳۰ گیگی" && items[0].totalAmountToman == 50_000L &&
+                items[1].purposeCategory == "۲۰۰ گرمی گردو" && items[1].totalAmountToman == 180_000L
+            val actual = items.joinToString(" + ") {
+                "${it.purposeCategory} (${PersianNumberUtils.formatToman(it.totalAmountToman)})"
+            }
+            ok to actual
+        }
+
+        // 40. Bidirectional LTR sign isolation on income amounts (placing "+" on the left of digits: "تومان +۱۳,۰۰۰,۰۰۰")
+        recordTest(
+            category = "قالب‌بندی مبالغ واریزی (RTL/LTR)",
+            title = "قرارگیری علامت مثبت (+) در سمت چپ عدد و با فاصله از کلمه تومان در مبالغ واریزی",
+            inputSummary = "formatIncomeToman(13_000_000L, showUnit = true)",
+            expectedSummary = "\u2066\u200E+۱۳,۰۰۰,۰۰۰\u2069 تومان"
+        ) {
+            val formatted = PersianNumberUtils.formatIncomeToman(13_000_000L, showUnit = true)
+            val ok = formatted == "\u2066\u200E+۱۳,۰۰۰,۰۰۰\u2069 تومان"
+            ok to formatted
+        }
+
         val totalMs = ((System.nanoTime() - suiteStartNanos) / 1_000_000L).coerceAtLeast(1L)
         val passedCount = results.count { it.passed }
         val failedCount = results.size - passedCount

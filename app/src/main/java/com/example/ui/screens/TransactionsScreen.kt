@@ -1,9 +1,11 @@
 package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -330,9 +332,9 @@ fun TransactionsScreen(
                     val formattedDayNet = when {
                         hideAmounts -> "**** تومان"
                         dayGroup.dayNetSumToman < 0L ->
-                            "-${PersianNumberUtils.formatToman(kotlin.math.abs(dayGroup.dayNetSumToman), showUnit = true)}"
+                            "\u2066\u200E-${PersianNumberUtils.formatToman(kotlin.math.abs(dayGroup.dayNetSumToman), showUnit = false)}\u2069 تومان"
                         dayGroup.dayNetSumToman > 0L ->
-                            "+${PersianNumberUtils.formatToman(dayGroup.dayNetSumToman, showUnit = true)}"
+                            PersianNumberUtils.formatIncomeToman(dayGroup.dayNetSumToman, showUnit = true)
                         else -> "۰ تومان"
                     }
                     val dayNetColor = when {
@@ -377,11 +379,12 @@ fun TransactionsScreen(
                     TwoStepSwipeToDeleteWrapper(
                         transactionId = tx.id,
                         onConfirmDelete = { onDeleteTransaction(tx) }
-                    ) {
+                    ) { onTriggerDeleteReveal ->
                         JibemanGroupedTransactionRow(
                             transaction = tx,
                             hideAmounts = hideAmounts,
                             onRowClick = { onTransactionClick(tx) },
+                            onRowLongClick = onTriggerDeleteReveal,
                             onUntaggedMicClick = { onUntaggedMicClick(tx) }
                         )
                     }
@@ -391,15 +394,31 @@ fun TransactionsScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun JibemanGroupedTransactionRow(
     transaction: TransactionEntity,
     hideAmounts: Boolean,
     onRowClick: () -> Unit,
+    onRowLongClick: (() -> Unit)? = null,
     onUntaggedMicClick: () -> Unit
 ) {
     val isIncome = transaction.type == "INCOME"
     val accentColor = if (isIncome) NishapurTurquoiseBright else RubyRoseSoft
+    val rawAmount = transaction.userShareToman.takeIf { it > 0L } ?: transaction.totalAmountToman
+    val formattedRowAmount = if (isIncome) {
+        PersianNumberUtils.formatIncomeToman(
+            amount = rawAmount,
+            showUnit = true,
+            hideAmount = hideAmounts
+        )
+    } else {
+        PersianNumberUtils.formatToman(
+            amount = rawAmount,
+            showUnit = true,
+            hideAmount = hideAmounts
+        )
+    }
 
     Column(
         modifier = Modifier
@@ -411,7 +430,10 @@ private fun JibemanGroupedTransactionRow(
                 if (transaction.isUntagged) NishapurTurquoise.copy(alpha = 0.4f) else OrosiHairline,
                 RoundedCornerShape(18.dp)
             )
-            .clickable(onClick = onRowClick)
+            .combinedClickable(
+                onClick = onRowClick,
+                onLongClick = onRowLongClick
+            )
             .padding(horizontal = 16.dp, vertical = 14.dp)
             .testTag("grouped_tx_${transaction.id}")
     ) {
@@ -450,11 +472,7 @@ private fun JibemanGroupedTransactionRow(
             }
 
             Text(
-                text = (if (isIncome) "+" else "") + PersianNumberUtils.formatToman(
-                    transaction.userShareToman.takeIf { it > 0L } ?: transaction.totalAmountToman,
-                    showUnit = true,
-                    hideAmount = hideAmounts
-                ),
+                text = formattedRowAmount,
                 style = MaterialTheme.typography.titleSmall.copy(
                     fontWeight = FontWeight.ExtraBold,
                     fontSize = 14.5.sp
@@ -478,19 +496,23 @@ private fun JibemanGroupedTransactionRow(
                 transaction.purpose != "نیازمند تکمیل صوتی" &&
                 transaction.purpose != "برداشت کارتی / خرید"
 
+            val noteText = if (hasCustomNote) {
+                transaction.title.ifBlank { transaction.displayTitle }
+            } else if (transaction.isUntagged) {
+                "خرید کارتی (${transaction.shortBankName})"
+            } else {
+                transaction.title
+            }
+
             Text(
-                text = if (hasCustomNote) {
-                    transaction.title.ifBlank { transaction.displayTitle }
-                } else if (transaction.isUntagged) {
-                    "خرید کارتی (${transaction.shortBankName})"
-                } else {
-                    transaction.title
-                },
+                text = noteText,
                 style = MaterialTheme.typography.bodyMedium.copy(
-                    fontWeight = if (hasCustomNote) FontWeight.Bold else FontWeight.Normal
+                    fontWeight = if (hasCustomNote) FontWeight.Bold else FontWeight.Normal,
+                    fontSize = if (noteText.length > 24) 13.sp else 14.sp,
+                    lineHeight = 19.sp
                 ),
                 color = if (hasCustomNote) SaffronGoldLight else OrosiOnSurfaceVariant,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f)
             )

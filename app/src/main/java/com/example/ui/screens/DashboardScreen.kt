@@ -9,10 +9,13 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -58,11 +61,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -286,7 +290,7 @@ fun DashboardScreen(
             }
         }
 
-        // 4. All Recent Transaction Cards (with 2-step swipe-to-delete and cached Jalali dates)
+        // 4. All Recent Transaction Cards (with in-place 2-step swipe/long-press delete & 120Hz smooth scroll)
         items(
             items = visibleTransactions,
             key = { tx -> tx.id },
@@ -295,11 +299,12 @@ fun DashboardScreen(
             TwoStepSwipeToDeleteWrapper(
                 transactionId = tx.id,
                 onConfirmDelete = { onDeleteTransaction(tx) }
-            ) {
+            ) { onTriggerDeleteReveal ->
                 CalmTransactionCard(
                     transaction = tx,
                     hideAmounts = settings.hideAmounts,
                     onRowClick = { onTransactionClick(tx) },
+                    onRowLongClick = onTriggerDeleteReveal,
                     onUntaggedMicClick = { onUntaggedMicClick(tx) }
                 )
             }
@@ -311,53 +316,90 @@ fun DashboardScreen(
 fun TwoStepSwipeToDeleteWrapper(
     transactionId: Long,
     onConfirmDelete: () -> Unit,
-    content: @Composable () -> Unit
+    content: @Composable (onLongPressTrigger: () -> Unit) -> Unit
 ) {
     var isConfirmOpen by remember(transactionId) { mutableStateOf(false) }
-    var dragAccumulated by remember(transactionId) { mutableFloatStateOf(0f) }
+    var dragOffsetPx by remember(transactionId) { mutableFloatStateOf(0f) }
+    var slideSign by remember(transactionId) { mutableFloatStateOf(-1f) }
 
-    Column(
+    val density = LocalDensity.current
+    val revealPx = remember(density) { with(density) { 196.dp.toPx() } }
+
+    val targetOffsetPx = if (isConfirmOpen) slideSign * revealPx else 0f
+    val animatedOffsetPx by animateFloatAsState(
+        targetValue = targetOffsetPx + dragOffsetPx,
+        animationSpec = tween(
+            durationMillis = if (dragOffsetPx != 0f) 0 else 220,
+            easing = FastOutSlowInEasing
+        ),
+        label = "inPlaceCardSlideOffset"
+    )
+
+    val isBackgroundVisible = isConfirmOpen || kotlin.math.abs(animatedOffsetPx) > 6f
+
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .pointerInput(transactionId) {
-                detectHorizontalDragGestures(
-                    onDragStart = { dragAccumulated = 0f },
-                    onDragEnd = {
-                        if (kotlin.math.abs(dragAccumulated) > 65f) {
+            .pointerInput(transactionId, revealPx) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val touchSlop = viewConfiguration.touchSlop
+                    var totalDx = 0f
+                    var totalDy = 0f
+                    var lockedHorizontal = false
+                    var rejectedAsVertical = false
+
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        if (!change.pressed) break
+
+                        val dx = change.position.x - change.previousPosition.x
+                        val dy = change.position.y - change.previousPosition.y
+                        totalDx += dx
+                        totalDy += dy
+
+                        if (!lockedHorizontal && !rejectedAsVertical) {
+                            val absDx = kotlin.math.abs(totalDx)
+                            val absDy = kotlin.math.abs(totalDy)
+                            if (absDy > touchSlop * 0.85f && absDy > absDx * 0.7f) {
+                                // Yield immediately to vertical LazyColumn scrolling
+                                rejectedAsVertical = true
+                                break
+                            } else if (absDx > touchSlop * 1.35f && absDx > absDy * 2.6f) {
+                                lockedHorizontal = true
+                            }
+                        }
+
+                        if (lockedHorizontal) {
+                            change.consume()
+                            dragOffsetPx = (dragOffsetPx + dx).coerceIn(-revealPx * 1.15f, revealPx * 1.15f)
+                        }
+                    }
+
+                    if (lockedHorizontal) {
+                        if (kotlin.math.abs(dragOffsetPx) > revealPx * 0.30f) {
+                            slideSign = if (dragOffsetPx >= 0f) 1f else -1f
                             isConfirmOpen = !isConfirmOpen
                         }
-                        dragAccumulated = 0f
-                    },
-                    onDragCancel = { dragAccumulated = 0f },
-                    onHorizontalDrag = { change, dragAmount ->
-                        change.consume()
-                        dragAccumulated += dragAmount
+                        dragOffsetPx = 0f
                     }
-                )
+                }
             }
     ) {
-        content()
-
-        AnimatedVisibility(visible = isConfirmOpen) {
-            Row(
+        // Behind-card action panel in the exact same row slot (never expands vertically underneath)
+        if (isBackgroundVisible) {
+            val alignOnRightInRtl = animatedOffsetPx <= 0f
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 6.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(RubyRose.copy(alpha = 0.24f))
-                    .border(1.dp, RubyRoseSoft, RoundedCornerShape(16.dp))
-                    .padding(horizontal = 14.dp, vertical = 10.dp)
+                    .matchParentSize()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(RubyRose.copy(alpha = 0.26f))
+                    .border(1.dp, RubyRoseSoft.copy(alpha = 0.75f), RoundedCornerShape(20.dp))
+                    .padding(horizontal = 12.dp)
                     .testTag("swipe_delete_confirm_bar_$transactionId"),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                contentAlignment = if (alignOnRightInRtl) Alignment.CenterStart else Alignment.CenterEnd
             ) {
-                Text(
-                    text = "حذف این تراکنش؟",
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                    color = AlabasterSilk,
-                    modifier = Modifier.weight(1f)
-                )
-
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -370,9 +412,10 @@ fun TwoStepSwipeToDeleteWrapper(
                             .border(1.dp, RubyRoseSoft, RoundedCornerShape(12.dp))
                             .clickable {
                                 isConfirmOpen = false
+                                dragOffsetPx = 0f
                                 onConfirmDelete()
                             }
-                            .padding(horizontal = 12.dp, vertical = 7.dp)
+                            .padding(horizontal = 11.dp, vertical = 8.dp)
                             .testTag("confirm_swipe_delete_$transactionId")
                     ) {
                         Icon(
@@ -385,7 +428,9 @@ fun TwoStepSwipeToDeleteWrapper(
                         Text(
                             text = "حذف قطعی",
                             style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.ExtraBold),
-                            color = AlabasterSilk
+                            color = AlabasterSilk,
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
 
@@ -395,8 +440,11 @@ fun TwoStepSwipeToDeleteWrapper(
                             .clip(RoundedCornerShape(12.dp))
                             .background(OrosiSurfaceHigh)
                             .border(1.dp, OrosiHairline, RoundedCornerShape(12.dp))
-                            .clickable { isConfirmOpen = false }
-                            .padding(horizontal = 10.dp, vertical = 7.dp)
+                            .clickable {
+                                isConfirmOpen = false
+                                dragOffsetPx = 0f
+                            }
+                            .padding(horizontal = 10.dp, vertical = 8.dp)
                             .testTag("cancel_swipe_delete_$transactionId")
                     ) {
                         Icon(
@@ -409,10 +457,26 @@ fun TwoStepSwipeToDeleteWrapper(
                         Text(
                             text = "انصراف",
                             style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                            color = AlabasterSilk
+                            color = AlabasterSilk,
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
                 }
+            }
+        }
+
+        // Foreground card that slides horizontally in-place
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .graphicsLayer {
+                    translationX = animatedOffsetPx
+                }
+        ) {
+            content {
+                slideSign = -1f
+                isConfirmOpen = !isConfirmOpen
             }
         }
     }
@@ -879,11 +943,13 @@ private fun BankAccountCarouselCard(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun CalmTransactionCard(
     transaction: TransactionEntity,
     hideAmounts: Boolean = false,
     onRowClick: () -> Unit,
+    onRowLongClick: (() -> Unit)? = null,
     onUntaggedMicClick: () -> Unit
 ) {
     val amountColor = when (transaction.type) {
@@ -919,9 +985,21 @@ fun CalmTransactionCard(
         hideAmounts
     ) {
         when (transaction.type) {
-            "INCOME" -> "+${PersianNumberUtils.formatToman(transaction.userShareToman, showUnit = true, hideAmount = hideAmounts)}"
-            "SELF_TRANSFER" -> PersianNumberUtils.formatToman(transaction.totalAmountToman, showUnit = true, hideAmount = hideAmounts)
-            else -> PersianNumberUtils.formatToman(transaction.userShareToman, showUnit = true, hideAmount = hideAmounts)
+            "INCOME" -> PersianNumberUtils.formatIncomeToman(
+                transaction.userShareToman,
+                showUnit = true,
+                hideAmount = hideAmounts
+            )
+            "SELF_TRANSFER" -> PersianNumberUtils.formatToman(
+                transaction.totalAmountToman,
+                showUnit = true,
+                hideAmount = hideAmounts
+            )
+            else -> PersianNumberUtils.formatToman(
+                transaction.userShareToman,
+                showUnit = true,
+                hideAmount = hideAmounts
+            )
         }
     }
 
@@ -935,7 +1013,10 @@ fun CalmTransactionCard(
                 color = if (transaction.isUntagged) NishapurTurquoise.copy(alpha = 0.45f) else OrosiHairline,
                 shape = RoundedCornerShape(20.dp)
             )
-            .clickable(onClick = onRowClick)
+            .combinedClickable(
+                onClick = onRowClick,
+                onLongClick = onRowLongClick
+            )
             .padding(horizontal = 14.dp, vertical = 14.dp)
             .testTag("transaction_item_${transaction.id}"),
         verticalAlignment = Alignment.CenterVertically
@@ -953,10 +1034,11 @@ fun CalmTransactionCard(
                 text = rowTitle,
                 style = MaterialTheme.typography.titleMedium.copy(
                     fontWeight = FontWeight.Bold,
-                    fontSize = 15.5.sp
+                    fontSize = if (rowTitle.length > 22) 13.8.sp else 15.5.sp,
+                    lineHeight = 20.sp
                 ),
                 color = AlabasterSilk,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(modifier = Modifier.height(4.dp))
@@ -997,22 +1079,10 @@ private fun PulsingTurquoiseMicButton(
     onClick: () -> Unit,
     testTag: String
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "micPulse")
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 1.0f,
-        targetValue = 1.04f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1100, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "scale"
-    )
-
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .wrapContentWidth(unbounded = false)
-            .scale(pulseScale)
             .clip(RoundedCornerShape(12.dp))
             .background(
                 Brush.horizontalGradient(

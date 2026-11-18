@@ -499,6 +499,40 @@ class ExampleUnitTest {
     }
 
     @Test
+    fun testVideo77Batch12And13AndIncomePlusFormatting() {
+        // 1. Video 77batch_12: Observation clause ("دیدم") + back-reference ("سی سوتی را خریدم ۲۵ هزار تومان")
+        val phrase12 = "رفتم بیرون یک سکه پارسیان ۲۰ سوتی و یک سکه پارسیان ۳۰ سوتی دیدم و سی سوتی را خریدم ۲۵ هزار تومان"
+        val items12 = PersianVoiceSlangParserEngine.parseMultiVoiceCommands(phrase12)
+        assertEquals(1, items12.size)
+        assertEquals("سکه پارسیان ۳۰ سوتی", items12[0].purposeCategory)
+        assertEquals(25_000L, items12[0].totalAmountToman)
+
+        // 2. Video 77batch_12 (Google ASR contraction: "سیتی را خریدم ۲۵ هزار تومان")
+        val phrase12Asr = "رفتم بیرون یک سکه پارسیان ۲۰ سوتی و یک سکه پارسیان سی سوتی دیدم و سیتی را خریدم ۲۵ هزار تومان"
+        val items12Asr = PersianVoiceSlangParserEngine.parseMultiVoiceCommands(phrase12Asr)
+        assertEquals(1, items12Asr.size)
+        assertEquals("سکه پارسیان ۳۰ سوتی", items12Asr[0].purposeCategory)
+        assertEquals(25_000L, items12Asr[0].totalAmountToman)
+
+        // 3. Video 77batch_13: Multi-stage price correction with "-ی" currency suffix ("۲۰ تومنی ... ولی نه ۱۰۰ تومنی خریدم")
+        val phrase13 = "من رفتم بیرون و برگشتم ۵۰ هزار تومان دادم یه سکه پارسیان ۲۰ سوتی ولی می‌خواستم ۲۰ تومنی بخرم ولی نه ۱۰۰ تومنی خریدم"
+        val items13 = PersianVoiceSlangParserEngine.parseMultiVoiceCommands(phrase13)
+        assertEquals(1, items13.size)
+        assertEquals("سکه پارسیان ۲۰ سوتی", items13[0].purposeCategory)
+        assertEquals(100_000L, items13[0].totalAmountToman)
+
+        val single13 = PersianVoiceSlangParserEngine.parseVoiceCommand(phrase13)
+        assertEquals("سکه پارسیان ۲۰ سوتی", single13.purposeCategory)
+        assertEquals(100_000L, single13.totalAmountToman)
+
+        // 4. Income "+" sign placed on the left of the number, separated from "تومان"
+        assertEquals(
+            "\u2066\u200E+۱۳,۰۰۰,۰۰۰\u2069 تومان",
+            PersianNumberUtils.formatIncomeToman(13_000_000L, showUnit = true)
+        )
+    }
+
+    @Test
     fun testFullOrosiRegressionAndStressSuitePasses100Percent() {
         val report = com.example.domain.OrosiRegressionSuite.runFullRegressionAndStressSuite()
         for (r in report.results) {
@@ -509,8 +543,8 @@ class ExampleUnitTest {
             )
         }
         assertEquals(true, report.allPassed)
-        assertEquals(35, report.totalCount)
-        assertEquals(35, report.passedCount)
+        assertEquals(40, report.totalCount)
+        assertEquals(40, report.passedCount)
     }
 }
 
